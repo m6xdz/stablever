@@ -1,0 +1,10 @@
+OSU!BAND Stable compile hotfix 2026-09-07
+
+GitHub Actions errors fixed:
+1) impl/cloud/avatar.hxx: util::load_texture_from_memory was missing from Stable texture_loader.hxx.
+   The same WIC in-memory decoder used by Beta is now present in Stable.
+2) impl/ui/overlay.hxx declared ImTextureID members before imgui.h was visible.
+   Added #include <imgui.h> to the header.
+
+The m_user_avatar/std::vector<ImTextureID> errors were cascading parser errors caused by #2.
+No gameplay/module behavior was changed by this hotfix.

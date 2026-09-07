@@ -9,6 +9,33 @@
 #pragma comment( lib, "Windowscodecs.lib" )
 
 namespace util {
+    inline ID3D11ShaderResourceView* load_texture_from_memory(ID3D11Device* device,const std::string& bytes) {
+        if(!device||bytes.empty()||bytes.size()>1024*1024)return nullptr;
+        struct com_scope { HRESULT hr=CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED);~com_scope(){if(SUCCEEDED(hr))CoUninitialize();} } scope;
+        Microsoft::WRL::ComPtr<IWICImagingFactory> factory;
+        Microsoft::WRL::ComPtr<IWICStream> stream;
+        Microsoft::WRL::ComPtr<IWICBitmapDecoder> decoder;
+        Microsoft::WRL::ComPtr<IWICBitmapFrameDecode> frame;
+        Microsoft::WRL::ComPtr<IWICFormatConverter> converter;
+        if(FAILED(CoCreateInstance(CLSID_WICImagingFactory,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&factory)))||
+           FAILED(factory->CreateStream(&stream))||
+           FAILED(stream->InitializeFromMemory(reinterpret_cast<BYTE*>(const_cast<char*>(bytes.data())),static_cast<DWORD>(bytes.size())))||
+           FAILED(factory->CreateDecoderFromStream(stream.Get(),nullptr,WICDecodeMetadataCacheOnDemand,&decoder))||
+           FAILED(decoder->GetFrame(0,&frame)))return nullptr;
+        UINT w=0,h=0;
+        if(FAILED(frame->GetSize(&w,&h))||!w||!h||w>512||h>512)return nullptr;
+        if(FAILED(factory->CreateFormatConverter(&converter))||FAILED(converter->Initialize(frame.Get(),GUID_WICPixelFormat32bppRGBA,WICBitmapDitherTypeNone,nullptr,0,WICBitmapPaletteTypeCustom)))return nullptr;
+        std::vector<BYTE> pixels(w*h*4);
+        if(FAILED(converter->CopyPixels(nullptr,w*4,static_cast<UINT>(pixels.size()),pixels.data())))return nullptr;
+        D3D11_TEXTURE2D_DESC desc{};desc.Width=w;desc.Height=h;desc.MipLevels=desc.ArraySize=desc.SampleDesc.Count=1;
+        desc.Format=DXGI_FORMAT_R8G8B8A8_UNORM;desc.Usage=D3D11_USAGE_IMMUTABLE;desc.BindFlags=D3D11_BIND_SHADER_RESOURCE;
+        D3D11_SUBRESOURCE_DATA init{};init.pSysMem=pixels.data();init.SysMemPitch=w*4;
+        Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
+        if(FAILED(device->CreateTexture2D(&desc,&init,&texture)))return nullptr;
+        ID3D11ShaderResourceView* result=nullptr;
+        if(FAILED(device->CreateShaderResourceView(texture.Get(),nullptr,&result)))return nullptr;
+        return result;
+    }
     inline ID3D11ShaderResourceView* load_texture_from_file( ID3D11Device* device, const std::wstring& file_path, int& out_width, int& out_height ) {
         HRESULT hr_co = CoInitializeEx( nullptr, COINIT_APARTMENTTHREADED );
         bool co_init = ( hr_co == S_OK || hr_co == S_FALSE );

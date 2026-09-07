@@ -11,6 +11,7 @@
 #include <Windows.h>
 #include <d3d11.h>
 #include <dxgi.h>
+#include <imgui.h>
 #include <impl/struct/game_snapshot.hxx>
 #include <core/aim_assist/aimbot.hxx>
 #include <core/relax/relax.hxx>

@@ -61,8 +61,8 @@ namespace ui {
         void set_authorized(bool value,uint64_t deadline=UINT64_MAX){m_authorized=value;m_auth_deadline=deadline;}
         bool stream_proof = false;
 
-        static constexpr int MENU_W = 980;
-        static constexpr int MENU_H = 650;
+        static constexpr int MENU_W = 1120;
+        static constexpr int MENU_H = 720;
 
     private:
         HWND m_hwnd = nullptr;

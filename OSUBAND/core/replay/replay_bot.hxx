@@ -8,6 +8,7 @@
 #include <cmath>
 #include <string>
 #include <algorithm>
+#include <iterator>
 #include <vector>
 #include <cstdint>
 
@@ -119,6 +120,14 @@ namespace replay {
             if ( !m_synced || game_time < m_last_game_time - 200 ) {
                 m_frame_index = 0;
                 m_synced = true;
+            } else if (m_last_game_time >= 0 && game_time - m_last_game_time > 300) {
+                // Jump directly to the current replay frame after a reader/render stall
+                // instead of walking a large backlog on the gameplay thread.
+                auto it = std::lower_bound(frames.begin(), frames.end(), game_time,
+                    [](const auto& f, int t){ return f.absolute_time < t; });
+                m_frame_index = static_cast<int>(std::distance(frames.begin(), it));
+                if (m_frame_index > 0) --m_frame_index;
+                m_frame_index = std::clamp(m_frame_index, 0, static_cast<int>(frames.size()) - 1);
             }
             m_last_game_time = game_time;
 

@@ -1,0 +1,20 @@
+name: Build OSU!BAND
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build release x64
+        run: msbuild OSUBAND.sln /m /p:Configuration=Release /p:Platform=x64
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: OSUBAND-release
+          path: builds/x64/Release/*

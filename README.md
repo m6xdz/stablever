@@ -7,7 +7,7 @@ OSU!BAND is the lazer-only continuation of the working LAME runtime port for osu
 - Product/project/executable renamed to `OSUBAND`.
 - osu!stable client code, offsets and stable attach path removed.
 - Original gameplay modules are preserved byte-for-byte from the known-working LAME baseline:
-  Aim Assist, Relax, Tap Assist, Replay Bot and Autobot.
+  Aim Assist, Relax, Replay and Stable Cloud Configs. Tap Assist and Autobot are not exposed in the Stable build.
 - New animated Dear ImGui interface with a custom OSU!BAND identity.
 - Lazer runtime status, bindings and config profiles kept.
 

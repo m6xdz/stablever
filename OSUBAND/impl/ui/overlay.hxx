@@ -20,8 +20,12 @@
 #include <impl/input/mouse_hook.hxx>
 #include <impl/config/config_store.hxx>
 #include <core/tap_assist/tap_assist.hxx>
-#include <impl/input/keyboard_hook.hxx>
 #include <impl/util/texture_loader.hxx>
+#include <impl/cloud/avatar.hxx>
+#include <future>
+#include <optional>
+#include <unordered_map>
+#include <atomic>
 #include <functional>
 #include <string>
 #include <vector>
@@ -55,6 +59,8 @@ namespace ui {
         autobot::c_autobot& auto_bot( ) { return m_autobot; }
         tap_assist::c_tap_assist& tap( ) { return m_tap_assist; }
 
+        void set_account(const std::string& name,const std::string& plan,const std::string& avatar="",const std::string& id="") {m_user=name;m_plan=plan;m_avatar_url=avatar;m_user_id=id;m_authorized=true;}
+        void set_authorized(bool value,uint64_t deadline=UINT64_MAX){m_authorized=value;m_auth_deadline=deadline;}
         bool stream_proof = false;
 
         static constexpr int MENU_W = 980;
@@ -62,7 +68,7 @@ namespace ui {
 
     private:
         HWND m_hwnd = nullptr;
-        bool m_visible = true;
+        bool m_visible = false;
         bool m_f4_was_down = false;
         snapshot_fn m_snapshot_fn;
         threads::c_cache* m_cache = nullptr;
@@ -73,7 +79,6 @@ namespace ui {
         replay::c_replay_bot m_replay;
         autobot::c_autobot m_autobot;
         tap_assist::c_tap_assist m_tap_assist;
-        input::c_keyboard_hook m_keyboard_hook;
 
         ID3D11Device* m_device = nullptr;
         ID3D11DeviceContext* m_context = nullptr;
@@ -83,9 +88,25 @@ namespace ui {
         int m_tab = 0;
         char m_replay_path_utf8[ 512 ]{};
         char m_config_name_utf8[ 128 ]{};
-        std::vector<std::string> m_config_profiles;
+        char m_config_description_utf8[ 240 ]{};
+        std::vector<config::profile_meta_t> m_cloud_profiles;
         std::string m_config_status;
         int m_config_selected = -1;
+        bool m_cloud_busy=false;
+        struct cloud_result {int kind;cloud::json data;std::string error;};
+        std::future<cloud_result> m_cloud_job;
+        cloud::avatar_cache m_avatars;
+        std::string m_user="OSU!BAND member",m_plan="Stable",m_user_id,m_avatar_url,m_active_stamp,m_pending_name,m_review_stamp;
+        ImTextureID m_user_avatar=nullptr;
+        std::vector<ImTextureID> m_profile_avatars;
+        std::optional<config::settings_t> m_pending_config;
+        std::unordered_map<std::string,std::string> m_known_review_status;
+        uint64_t m_next_cloud_poll=0;
+        bool m_hud_enabled=true;
+        std::atomic<bool> m_authorized{false};
+        std::atomic<uint64_t> m_auth_deadline{UINT64_MAX};
+        struct toast_t{std::string title,detail;uint64_t born=0;bool positive=true;};
+        std::vector<toast_t> m_toasts;
 
         osu::game_state_t m_prev_state = osu::game_state_t::unknown;
         int32_t m_prev_map_id = -1;
@@ -118,6 +139,12 @@ namespace ui {
         };
         std::vector<trail_point_t> m_cursor_history;
 
+        void cloud_task(int kind,cloud::json payload=cloud::json::object());
+        void cloud_tick();
+        void refresh_cloud();
+        void notify(std::string title,std::string detail={},bool positive=true);
+        void draw_toasts();
+        bool osu_foreground() const;
         static LRESULT CALLBACK wnd_proc( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp );
         bool init_d3d( );
         void cleanup_d3d( );

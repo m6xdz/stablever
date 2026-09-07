@@ -107,7 +107,7 @@ namespace input {
         }
 
         void hook_thread_main( ) {
-            ::SetThreadPriority( ::GetCurrentThread( ), THREAD_PRIORITY_HIGHEST );
+            ::SetThreadPriority( ::GetCurrentThread( ), THREAD_PRIORITY_ABOVE_NORMAL );
             m_thread_id = GetCurrentThreadId( );
             s_active = this;
 

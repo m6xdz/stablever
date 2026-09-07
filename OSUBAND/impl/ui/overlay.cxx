@@ -49,12 +49,6 @@ namespace {
         return true;
     }
 
-    bool overlay_keyboard_hook_callback( void* ctx, int vk, bool is_down, int64_t press_qpc ) {
-        if ( !ctx ) return false;
-        auto* overlay = static_cast<ui::c_overlay*>( ctx );
-        return overlay->tap( ).handle_key_event( vk, is_down, press_qpc );
-    }
-
     inline float& hover_anim( uint64_t key ) {
         static std::unordered_map<uint64_t, float> anims;
         return anims[ key ];
@@ -115,17 +109,16 @@ namespace ui {
         RegisterClassExW( &wc );
 
         m_hwnd = CreateWindowExW(
-            WS_EX_APPWINDOW | WS_EX_LAYERED | WS_EX_TOPMOST,
+            WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
             wc.lpszClassName, L"OSU!BAND", WS_POPUP,
             0, 0, MENU_W, MENU_H,
             nullptr, nullptr, instance, this );
 
         if ( !m_hwnd ) return false;
 
-        enable_acrylic( m_hwnd );
         SetLayeredWindowAttributes( m_hwnd, 0, 255, LWA_ALPHA );
 
-        ShowWindow( m_hwnd, SW_SHOWDEFAULT );
+        ShowWindow( m_hwnd, SW_HIDE );
         UpdateWindow( m_hwnd );
 
         if ( !init_d3d( ) ) return false;
@@ -152,18 +145,17 @@ namespace ui {
         m_mouse_hook.set_transform( overlay_aim_hook_transform, this );
         m_mouse_hook.install( );
 
-        m_keyboard_hook.set_callback( overlay_keyboard_hook_callback, this );
-        m_keyboard_hook.install( );
-
         m_aim.start();
+        refresh_cloud();
 
         return true;
     }
 
     void c_overlay::destroy( ) {
+        if(m_cloud_job.valid())m_cloud_job.wait();
+        m_avatars.clear();
         m_aim.stop( );
         m_mouse_hook.uninstall( );
-        m_keyboard_hook.uninstall( );
 
         ImGui_ImplDX11_Shutdown( );
         ImGui_ImplWin32_Shutdown( );
@@ -184,11 +176,9 @@ namespace ui {
                 return false;
         }
 
-        if ( stream_proof )
-            SetWindowDisplayAffinity( m_hwnd, WDA_EXCLUDEFROMCAPTURE );
-        else
-            SetWindowDisplayAffinity( m_hwnd, WDA_NONE );
-
+        static bool last_proof=false;static bool affinity_set=false;
+        if(!affinity_set||last_proof!=stream_proof){SetWindowDisplayAffinity(m_hwnd,stream_proof?WDA_EXCLUDEFROMCAPTURE:WDA_NONE);last_proof=stream_proof;affinity_set=true;}
+        cloud_tick();
         handle_hotkeys( );
         update_overlay_position( );
         apply_visibility( );
@@ -196,77 +186,34 @@ namespace ui {
         return true;
     }
 
+    bool c_overlay::osu_foreground() const {
+        const HWND osu=input::target_window();if(!osu||!IsWindow(osu)||IsIconic(osu))return false;
+        const HWND fg=GetForegroundWindow();return fg&&GetAncestor(fg,GA_ROOT)==GetAncestor(osu,GA_ROOT);
+    }
+
     void c_overlay::handle_hotkeys( ) {
-        const bool menu_down = ( GetAsyncKeyState( m_menu_keybind ) & 0x8000 ) != 0;
-        if ( menu_down && !m_f4_was_down )
-            m_visible = !m_visible;
-        m_f4_was_down = menu_down;
+        if(!osu_foreground()){m_visible=false;m_f4_was_down=false;return;}
+        if(m_waiting_menu){m_f4_was_down=false;return;}
+        const bool menu_down=(GetAsyncKeyState(m_menu_keybind)&0x8000)!=0;
+        if(menu_down&&!m_f4_was_down)m_visible=!m_visible;
+        m_f4_was_down=menu_down;
     }
 
     void c_overlay::update_overlay_position( ) {
-        if ( !m_hwnd ) return;
-
-        const HWND osu_hwnd = input::target_window( );
-        input::invalidate_virtual_desktop( );
-        input::virtual_desktop( );
-
-        int target_x = 0, target_y = 0, target_w = 0, target_h = 0;
-
-        if ( !osu_hwnd || !IsWindow( osu_hwnd ) ) {
-            target_w = GetSystemMetrics( SM_CXSCREEN );
-            target_h = GetSystemMetrics( SM_CYSCREEN );
-        }
-        else {
-            RECT client{};
-            if ( playfield::get_playfield_rect( osu_hwnd, client ) ) {
-                target_x = client.left;
-                target_y = client.top;
-                target_w = client.right - client.left;
-                target_h = client.bottom - client.top;
-            }
-            else {
-                target_w = GetSystemMetrics( SM_CXSCREEN );
-                target_h = GetSystemMetrics( SM_CYSCREEN );
-            }
-        }
-
-        SetWindowPos( m_hwnd, HWND_TOPMOST, target_x, target_y, target_w, target_h, SWP_NOACTIVATE );
+        if(!m_hwnd)return;static uint64_t next=0;const uint64_t now=GetTickCount64();if(now<next)return;next=now+100;
+        const HWND osu=input::target_window();if(!osu||!IsWindow(osu)||IsIconic(osu))return;RECT client{};if(!playfield::get_playfield_rect(osu,client))return;
+        static RECT prev{};RECT cur{client.left,client.top,client.right,client.bottom};if(!EqualRect(&prev,&cur)){SetWindowPos(m_hwnd,HWND_TOPMOST,client.left,client.top,client.right-client.left,client.bottom-client.top,SWP_NOACTIVATE);prev=cur;}
     }
 
     void c_overlay::apply_visibility( ) {
-        if ( !m_hwnd ) return;
-
-        static bool prev_stream_proof = false;
-        const bool stream_proof_changed = prev_stream_proof != stream_proof;
-        prev_stream_proof = stream_proof;
-
-        bool should_show = m_visible;
-
-        if ( should_show ) {
-            LONG ex = GetWindowLongW( m_hwnd, GWL_EXSTYLE );
-            if ( stream_proof ) {
-                ex |= WS_EX_TOOLWINDOW;
-                ex &= ~WS_EX_APPWINDOW;
-            } else {
-                ex |= WS_EX_APPWINDOW;
-                ex &= ~WS_EX_TOOLWINDOW;
-            }
-            if ( m_visible ) {
-                ex &= ~WS_EX_TRANSPARENT;
-            } else {
-                ex |= WS_EX_TRANSPARENT;
-            }
-            SetWindowLongW( m_hwnd, GWL_EXSTYLE, ex );
-            ShowWindow( m_hwnd, SW_SHOWNA );
-
-            if ( stream_proof_changed ) {
-                ShowWindow( m_hwnd, SW_HIDE );
-                ShowWindow( m_hwnd, SW_SHOWNA );
-            }
-        }
-        else {
-            ShowWindow( m_hwnd, SW_HIDE );
-        }
+        if(!m_hwnd)return;
+        const bool in_osu=osu_foreground();
+        const bool show=in_osu&&(m_visible||m_hud_enabled||!m_toasts.empty());
+        if(!show){ShowWindow(m_hwnd,SW_HIDE);return;}
+        LONG ex=GetWindowLongW(m_hwnd,GWL_EXSTYLE);
+        ex|=WS_EX_TOOLWINDOW|WS_EX_LAYERED|WS_EX_TOPMOST|WS_EX_NOACTIVATE;ex&=~WS_EX_APPWINDOW;
+        if(m_visible)ex&=~WS_EX_TRANSPARENT;else ex|=WS_EX_TRANSPARENT;
+        SetWindowLongW(m_hwnd,GWL_EXSTYLE,ex);ShowWindow(m_hwnd,SW_SHOWNOACTIVATE);
     }
 
     LRESULT CALLBACK c_overlay::wnd_proc( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp ) {
@@ -283,6 +230,8 @@ namespace ui {
             PostQuitMessage( 0 );
             return 0;
         }
+        if(msg==WM_MOUSEACTIVATE)return MA_NOACTIVATE;
+        if(msg==WM_ACTIVATE)return 0;
         if ( msg == WM_SETCURSOR ) {
             if ( self && self->stream_proof && self->m_streamproof_hide_cursor ) {
                 SetCursor( nullptr );
@@ -339,21 +288,44 @@ namespace ui {
         if ( m_device ) { m_device->Release( ); m_device = nullptr; }
     }
 
+    void c_overlay::notify(std::string title,std::string detail,bool positive){
+        if(m_toasts.size()>=5)m_toasts.erase(m_toasts.begin());m_toasts.push_back({std::move(title),std::move(detail),GetTickCount64(),positive});
+    }
+    void c_overlay::draw_toasts(){
+        auto* d=ImGui::GetForegroundDrawList();const auto disp=ImGui::GetIO().DisplaySize;const uint64_t now=GetTickCount64();float y=72.f;
+        for(size_t i=0;i<m_toasts.size();){auto&t=m_toasts[i];float age=float(now-t.born)/1000.f;if(age>4.4f){m_toasts.erase(m_toasts.begin()+i);continue;}float a=age<.28f?age/.28f:(age>3.8f?std::max(0.f,(4.4f-age)/.6f):1.f);float slide=(1.f-a)*30.f,w=350.f,h=t.detail.empty()?52.f:70.f;ImVec2 q(disp.x-w-20.f+slide,y);ImU32 edge=t.positive?IM_COL32(90,210,255,int(170*a)):IM_COL32(255,130,140,int(180*a));d->AddRectFilled(q,ImVec2(q.x+w,q.y+h),IM_COL32(11,16,26,int(238*a)),11);d->AddRect(q,ImVec2(q.x+w,q.y+h),edge,11);d->AddText(ImVec2(q.x+16,q.y+12),IM_COL32(242,247,255,int(255*a)),t.title.c_str());if(!t.detail.empty())d->AddText(ImVec2(q.x+16,q.y+37),IM_COL32(145,157,178,int(255*a)),t.detail.c_str());y+=h+9;++i;}
+    }
+    void c_overlay::cloud_task(int kind,cloud::json payload){
+        if(m_cloud_busy)return;try{auto account=cloud::client::restore();m_cloud_busy=true;m_cloud_job=std::async(std::launch::async,[account,kind,payload]{try{
+            if(kind==2){auto b=payload;b["submit"]=false;account.api("beta/configs",&b,true,"stable");}
+            if(kind==3){auto b=payload;b["submit"]=true;account.api("beta/configs",&b,true,"stable");}
+            if(kind==4)account.api("beta/configs/install",&payload,true,"stable");
+            if(kind==5)account.api("beta/configs/uninstall",&payload,true,"stable");
+            if(kind==6)account.api("beta/active",&payload,true,"stable");
+            auto data=account.api("beta/configs",nullptr,true,"stable");data["active"]=account.api("beta/active",nullptr,true,"stable").value("config",cloud::json());return cloud_result{kind,std::move(data),{}};
+        }catch(const std::exception&e){return cloud_result{kind,{},e.what()};}});}catch(const std::exception&e){m_cloud_busy=false;m_config_status=e.what();notify("Cloud",e.what(),false);}
+    }
+    void c_overlay::refresh_cloud(){cloud_task(1);}
+    void c_overlay::cloud_tick(){
+        m_avatars.tick(m_device);m_user_avatar=reinterpret_cast<ImTextureID>(m_avatars.get(m_avatar_url));m_profile_avatars.clear();for(const auto&p:m_cloud_profiles)m_profile_avatars.push_back(reinterpret_cast<ImTextureID>(m_avatars.get(p.avatar_url)));
+        if(m_cloud_job.valid()&&m_cloud_job.wait_for(std::chrono::milliseconds(0))==std::future_status::ready){auto r=m_cloud_job.get();m_cloud_busy=false;m_next_cloud_poll=GetTickCount64()+8000;if(!r.error.empty()){m_config_status=r.error;notify("Cloud",r.error,false);}else try{
+            std::string selected=m_config_selected>=0&&m_config_selected<(int)m_cloud_profiles.size()?m_cloud_profiles[m_config_selected].id:"";auto prev=m_known_review_status;m_cloud_profiles.clear();m_config_selected=-1;m_user_id=r.data.value("userId",m_user_id);
+            for(const auto&c:r.data.at("configs")){config::profile_meta_t p;p.id=c.at("id");p.owner_id=c.at("owner_id");p.name=c.at("name");p.author=c.value("author","");p.avatar_url=c.value("avatar","");p.description=c.value("description","");p.status=c.value("status","private");p.review_note=c.value("review_note","");p.author_role=c.value("author_role","user");p.updated_at=c.value("updated_at",int64_t(0));p.reviewed_at=c.value("reviewed_at",int64_t(0));p.reviewed_by_name=c.value("reviewed_by_name","");p.official=c.value("official",0)!=0;p.installed=c.value("installed",false);p.revision=c.at("revision");p.channel=c.value("channel","stable");if(p.channel!="stable")continue;if(p.id==selected)m_config_selected=(int)m_cloud_profiles.size();if(p.owner_id==m_user_id){auto it=prev.find(p.id);if(it!=prev.end()&&it->second!=p.status&&(p.status=="published"||p.status=="rejected")){auto admin=p.reviewed_by_name.empty()?"Administrator":p.reviewed_by_name;if(p.status=="published")notify("Config approved",admin+std::string(" · ")+p.name);else notify("Config rejected",admin+std::string(" · ")+p.name,false);}m_known_review_status[p.id]=p.status;}m_cloud_profiles.push_back(std::move(p));}
+            const auto&review=r.data.value("reviewTarget",cloud::json());if(review.is_object()&&review.contains("config_id")){auto stamp=review.at("config_id").get<std::string>()+":"+std::to_string(review.at("revision").get<int>());if(stamp!=m_review_stamp){config::settings_t next;std::istringstream in(review.at("cfg").get<std::string>());if(config::parse_settings(in,next)){config::validate(next);next.autobot_enabled=false;next.tap_enabled=false;next.lab_enabled=false;next.replay_path_utf8.clear();m_pending_config=next;m_pending_name=review.value("name","Review config");m_review_stamp=stamp;notify("Review config ready",m_pending_name+" · "+review.value("author",""));}}}
+            const auto&active=r.data.at("active");if(active.is_object()){auto stamp=active.at("id").get<std::string>()+":"+std::to_string(active.at("updated_at").get<int64_t>());if(stamp!=m_active_stamp){config::settings_t next;std::istringstream in(active.at("cfg").get<std::string>());if(!config::parse_settings(in,next))throw std::runtime_error("Invalid cloud config");config::validate(next);next.autobot_enabled=false;next.tap_enabled=false;next.lab_enabled=false;next.replay_path_utf8.clear();m_pending_config=next;m_pending_name=active.value("name","Cloud config");m_active_stamp=stamp;notify("Config queued",m_pending_name);}}
+            if(r.kind==2)notify("Config saved","Private · Stable");if(r.kind==3)notify("Sent for review","An administrator can publish it for Stable.");if(r.kind==4)notify("Config installed","Cloud only");if(r.kind==5)notify("Config removed","You can install it again later.");
+        }catch(const std::exception&e){m_config_status=e.what();notify("Cloud",e.what(),false);}}
+        if(m_pending_config&&m_authorized&&m_prev_state!=osu::game_state_t::play){apply_settings(*m_pending_config);m_pending_config.reset();notify("Config applied",m_pending_name);m_config_status="Applied: "+m_pending_name;}
+        if(!m_cloud_busy&&GetTickCount64()>=m_next_cloud_poll){m_next_cloud_poll=GetTickCount64()+8000;refresh_cloud();}
+    }
+
     void c_overlay::render_frame( ) {
         osu::full_snapshot_t snap;
         if ( m_snapshot_fn )
             snap = m_snapshot_fn( );
 
-        bool should_show = m_visible;
-        if ( !should_show ) {
-            if ( m_context && m_rtv ) {
-                const float clear[ 4 ]{ 0.0f, 0.0f, 0.0f, 0.0f };
-                m_context->OMSetRenderTargets( 1, &m_rtv, nullptr );
-                m_context->ClearRenderTargetView( m_rtv, clear );
-            }
-            if ( m_swap_chain ) m_swap_chain->Present( 0, 0 );
-            return;
-        }
+        const bool should_show = osu_foreground() && (m_visible || m_hud_enabled || !m_toasts.empty());
+        if(!should_show){::Sleep(8);return;}
 
         ImGui_ImplDX11_NewFrame( );
         ImGui_ImplWin32_NewFrame( );
@@ -396,6 +368,12 @@ namespace ui {
             m_streamproof_hide_cursor = false;
         }
 
+        if(capture_settings().hud_enabled){
+            SYSTEMTIME st{};GetLocalTime(&st);char clock[16]{};std::snprintf(clock,sizeof(clock),"%02u:%02u:%02u",st.wHour,st.wMinute,st.wSecond);
+            auto* hud=ImGui::GetForegroundDrawList();const auto line=std::string("OSU!BAND Stable [osuband.dev] / ")+clock+" / "+m_user;
+            const ImVec2 ts=ImGui::CalcTextSize(line.c_str());hud->AddRectFilled(ImVec2(18,18),ImVec2(46+ts.x,55),IM_COL32(12,17,27,235),10);hud->AddRect(ImVec2(18,18),ImVec2(46+ts.x,55),IM_COL32(90,210,255,90),10);hud->AddText(ImVec2(31,29),theme::accent(),line.c_str());
+        }
+        draw_toasts();
         ImGui::Render( );
 
         if ( m_context && m_rtv ) {
@@ -405,7 +383,7 @@ namespace ui {
         }
 
         ImGui_ImplDX11_RenderDrawData( ImGui::GetDrawData( ) );
-        if ( m_swap_chain ) m_swap_chain->Present( 0, 0 );
+        if ( m_swap_chain ) m_swap_chain->Present( 1, 0 );
     }
 
     void c_overlay::apply_custom_keys( osu::game_snapshot_t& game ) const {
@@ -444,7 +422,7 @@ namespace ui {
         s.replay_path_utf8 = m_replay_path_utf8;
         s.replay_parse_buttons = m_replay.parse_buttons;
 
-        s.autobot_enabled = m_autobot.enabled;
+        s.autobot_enabled = false;
         s.autobot_aim_spread = m_autobot.aim_spread;
         s.autobot_curve_strength = m_autobot.curve_strength;
         s.autobot_drift_amount = m_autobot.drift_amount;
@@ -452,7 +430,7 @@ namespace ui {
         s.autobot_slider_laziness = m_autobot.slider_laziness;
         s.autobot_spinner_rpm = m_autobot.spinner_rpm;
 
-        s.tap_enabled = m_tap_assist.enabled;
+        s.tap_enabled = false;
         s.tap_assist_window = m_tap_assist.assist_window;
         s.tap_randomization = m_tap_assist.randomization;
         s.tap_ignore_sliders = m_tap_assist.ignore_sliders;
@@ -461,6 +439,7 @@ namespace ui {
         s.custom_right_key = m_custom_right_key;
         s.menu_keybind = m_menu_keybind;
         s.stream_proof = stream_proof;
+        s.hud_enabled=m_hud_enabled;s.lab_enabled=false;
 
         return s;
     }
@@ -506,7 +485,7 @@ namespace ui {
 
         m_replay.parse_buttons = s.replay_parse_buttons;
 
-        m_autobot.enabled = s.autobot_enabled;
+        m_autobot.enabled = false;
         m_autobot.aim_spread = s.autobot_aim_spread;
         m_autobot.curve_strength = s.autobot_curve_strength;
         m_autobot.drift_amount = s.autobot_drift_amount;
@@ -514,7 +493,7 @@ namespace ui {
         m_autobot.slider_laziness = s.autobot_slider_laziness;
         m_autobot.spinner_rpm = s.autobot_spinner_rpm;
 
-        m_tap_assist.enabled = s.tap_enabled;
+        m_tap_assist.enabled = false;
         m_tap_assist.assist_window = s.tap_assist_window;
         m_tap_assist.randomization = s.tap_randomization;
         m_tap_assist.ignore_sliders = s.tap_ignore_sliders;
@@ -523,6 +502,7 @@ namespace ui {
         m_custom_right_key = s.custom_right_key;
         m_menu_keybind = s.menu_keybind;
         stream_proof = s.stream_proof;
+        m_hud_enabled=s.hud_enabled;
 
     }
 
@@ -539,7 +519,10 @@ namespace ui {
     }
 
     void c_overlay::tick_modules( const osu::game_snapshot_t& game, const osu::beatmap_data_t& beatmap ) {
+        if(GetTickCount64()>=m_auth_deadline.load())m_authorized=false;
+        if(!m_authorized){reset_modules(game);return;}
         const bool in_play = game.cur_state == osu::game_state_t::play;
+        DWORD fgpid=0;GetWindowThreadProcessId(GetForegroundWindow(),&fgpid);if(in_play&&fgpid!=static_cast<DWORD>(game.pid)){reset_modules(game);m_prev_game_time=-1;return;}
         const bool replay_active = game.is_replay;
         const bool was_play = m_prev_state == osu::game_state_t::play;
         const std::string map_sig =
@@ -600,10 +583,8 @@ namespace ui {
             if ( !map_paused )
                 m_aim.update( mod_game, beatmap );
 
-            m_relax.update( mod_game, beatmap );
-            m_replay.update( mod_game, beatmap, map_paused );
-            m_autobot.update( mod_game, beatmap, map_paused );
-            m_tap_assist.update( mod_game, beatmap );
+            if(map_paused)m_relax.on_leave_play(mod_game);else m_relax.update(mod_game,beatmap);
+            m_replay.update(mod_game,beatmap,map_paused);
         }
         else {
             m_game_time_stall_start_ms = 0;
@@ -725,98 +706,28 @@ namespace ui {
 
         update_tab_transition( m_tab, io.DeltaTime );
 
-        static const char* tab_names[] = { "Aim Assist", "Relax", "Tap Assist", "Replay", "Autobot", "Status", "Profiles" };
+        static const char* tab_names[] = { "Aim Assist", "Relax", "Replay", "Status", "Cloud Configs" };
         static const char* tab_subtitles[] = {
-            "Humanized cursor correction",
-            "Automatic key timing",
-            "Correct your physical taps",
-            "Play back .osr input",
-            "Full cursor automation",
-            "Runtime & key settings",
-            "Save and load presets"
+            "Cursor correction", "Timing control", "Replay playback",
+            "Runtime and keybinds", "Published Stable configs"
         };
-        static const float tab_y[] = { 112.f, 153.f, 194.f, 235.f, 276.f, 370.f, 411.f };
-        const float tab_h = 36.0f;
-
-        dl->AddText( S( 17.f, 86.f ), theme::text_dim(), "GAMEPLAY" );
-        dl->AddText( S( 17.f, 344.f ), theme::text_dim(), "UTILITY" );
-
-        const ImVec2 mouse = io.MousePos;
-        const bool mouse_clicked = ImGui::IsMouseClicked( ImGuiMouseButton_Left );
-        const float target_indicator_y = wpos.y + tab_y[ m_tab ];
-        if ( g_tab_indicator_y <= 0.01f ) g_tab_indicator_y = target_indicator_y;
-        g_tab_indicator_y += ( target_indicator_y - g_tab_indicator_y ) * std::min( io.DeltaTime * 15.0f, 1.0f );
-
-        for ( int i = 0; i < 7; ++i ) {
-            const float tx = wpos.x + 10.0f;
-            const float ty = wpos.y + tab_y[i];
-            const float tw = SIDEBAR_W - 20.0f;
-            const ImVec2 btn_min( tx, ty );
-            const ImVec2 btn_max( tx + tw, ty + tab_h );
-            const bool hov = mouse.x >= btn_min.x && mouse.x <= btn_max.x && mouse.y >= btn_min.y && mouse.y <= btn_max.y;
-            const bool active = i == m_tab;
-            if ( hov && mouse_clicked ) m_tab = i;
-
-            float& anim = tab_hover_anim( i );
-            const float target = ( hov || active ) ? 1.0f : 0.0f;
-            anim += ( target - anim ) * std::min( io.DeltaTime * 12.0f, 1.0f );
-
-            if ( anim > 0.01f ) {
-                const ImU32 bg = active
-                    ? IM_COL32( 90, 210, 255, static_cast<int>( 25 * alpha ) )
-                    : IM_COL32( 255, 255, 255, static_cast<int>( 7 * anim * alpha ) );
-                dl->AddRectFilled( btn_min, btn_max, bg, 8.0f );
-                if ( active )
-                    dl->AddRect( btn_min, btn_max, IM_COL32( 90, 210, 255, static_cast<int>( 32 * alpha ) ), 8.0f, 0, 1.0f );
-            }
-
-            if ( active ) {
-                const float iy = g_tab_indicator_y;
-                dl->AddRectFilled( ImVec2( btn_min.x, iy + 7.f ), ImVec2( btn_min.x + 3.f, iy + tab_h - 7.f ),
-                    theme::accent(), 2.0f );
-            }
-
-            const float icx = btn_min.x + 18.f;
-            const float icy = btn_min.y + tab_h * 0.5f;
-            const ImU32 ic = active ? theme::accent() : ( hov ? theme::text_bright() : theme::text_dim() );
-            const float r = active ? 5.2f + 0.5f * std::sin( g_time * 2.f ) : 4.8f;
-            switch ( i ) {
-                case 0: // target
-                    dl->AddCircle( ImVec2(icx,icy), r, ic, 18, 1.4f );
-                    dl->AddCircleFilled( ImVec2(icx,icy), 1.5f, ic, 10 );
-                    dl->AddLine( ImVec2(icx-8,icy), ImVec2(icx-4,icy), ic, 1.1f );
-                    dl->AddLine( ImVec2(icx+4,icy), ImVec2(icx+8,icy), ic, 1.1f );
-                    break;
-                case 1: // pulse
-                    dl->AddBezierCubic( ImVec2(icx-7,icy+2), ImVec2(icx-3,icy-7), ImVec2(icx+3,icy+7), ImVec2(icx+7,icy-2), ic, 1.6f );
-                    break;
-                case 2: // taps
-                    dl->AddCircle( ImVec2(icx-3,icy), 3.3f, ic, 12, 1.3f );
-                    dl->AddCircle( ImVec2(icx+4,icy), 3.3f, ic, 12, 1.3f );
-                    break;
-                case 3: // replay
-                    dl->PathArcTo( ImVec2(icx,icy), 6.f, -2.6f, 2.4f, 16 );
-                    dl->PathStroke( ic, 0, 1.5f );
-                    dl->AddTriangleFilled( ImVec2(icx-5.3f,icy-3.f), ImVec2(icx-8.f,icy-1.f), ImVec2(icx-4.5f,icy+0.5f), ic );
-                    break;
-                case 4: // bot spark
-                    dl->AddCircle( ImVec2(icx,icy), 5.2f, ic, 12, 1.3f );
-                    dl->AddLine( ImVec2(icx-7,icy-7), ImVec2(icx+7,icy+7), ic, 1.0f );
-                    dl->AddLine( ImVec2(icx+7,icy-7), ImVec2(icx-7,icy+7), ic, 1.0f );
-                    break;
-                case 5: // status
-                    dl->AddCircleFilled( ImVec2(icx,icy), 5.f, snap.game.attached ? theme::success() : theme::text_dim(), 16 );
-                    dl->AddCircle( ImVec2(icx,icy), 8.f, snap.game.attached ? IM_COL32(92,232,166,60) : IM_COL32(104,117,144,35), 16, 1.0f );
-                    break;
-                case 6: // profiles
-                    dl->AddRect( ImVec2(icx-6,icy-5), ImVec2(icx+6,icy+5), ic, 3.f, 0, 1.3f );
-                    dl->AddLine( ImVec2(icx-3,icy-1), ImVec2(icx+3,icy-1), ic, 1.0f );
-                    dl->AddLine( ImVec2(icx-3,icy+2), ImVec2(icx+2,icy+2), ic, 1.0f );
-                    break;
-            }
-
-            dl->AddText( ImVec2( btn_min.x + 35.f, btn_min.y + 10.f ),
-                active ? theme::text_bright() : ( hov ? theme::text_bright() : theme::text() ), tab_names[i] );
+        static const int tab_ids[] = { 0, 1, 3, 5, 6 };
+        static const float tab_y[] = { 112.f, 153.f, 194.f, 288.f, 329.f };
+        const float tab_h=36.f;
+        dl->AddText(S(17.f,86.f),theme::text_dim(),"GAMEPLAY");
+        dl->AddText(S(17.f,262.f),theme::text_dim(),"UTILITY");
+        const ImVec2 mouse=io.MousePos;const bool mouse_clicked=ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+        int visible_active=0;for(int i=0;i<5;++i)if(tab_ids[i]==m_tab)visible_active=i;
+        const float target_indicator_y=wpos.y+tab_y[visible_active];if(g_tab_indicator_y<=.01f)g_tab_indicator_y=target_indicator_y;
+        g_tab_indicator_y+=(target_indicator_y-g_tab_indicator_y)*std::min(io.DeltaTime*15.f,1.f);
+        for(int i=0;i<5;++i){const float tx=wpos.x+10.f,ty=wpos.y+tab_y[i],tw=SIDEBAR_W-20.f;ImVec2 mn(tx,ty),mx(tx+tw,ty+tab_h);bool hov=mouse.x>=mn.x&&mouse.x<=mx.x&&mouse.y>=mn.y&&mouse.y<=mx.y;bool active=tab_ids[i]==m_tab;if(hov&&mouse_clicked)m_tab=tab_ids[i];float&anim=tab_hover_anim(i);float target=(hov||active)?1.f:0.f;anim+=(target-anim)*std::min(io.DeltaTime*12.f,1.f);if(anim>.01f){ImU32 bg=active?IM_COL32(90,210,255,int(25*alpha)):IM_COL32(255,255,255,int(7*anim*alpha));dl->AddRectFilled(mn,mx,bg,8);if(active)dl->AddRect(mn,mx,IM_COL32(90,210,255,int(32*alpha)),8,0,1);}if(active)dl->AddRectFilled(ImVec2(mn.x,g_tab_indicator_y+7),ImVec2(mn.x+3,g_tab_indicator_y+tab_h-7),theme::accent(),2);
+            const float icx=mn.x+18,icy=mn.y+tab_h*.5f;const ImU32 ic=active?theme::accent():(hov?theme::text_bright():theme::text_dim());
+            if(i==0){dl->AddCircle(ImVec2(icx,icy),5,ic,18,1.4f);dl->AddCircleFilled(ImVec2(icx,icy),1.5f,ic);}
+            else if(i==1)dl->AddBezierCubic(ImVec2(icx-7,icy+2),ImVec2(icx-3,icy-7),ImVec2(icx+3,icy+7),ImVec2(icx+7,icy-2),ic,1.6f);
+            else if(i==2){dl->PathArcTo(ImVec2(icx,icy),6,-2.6f,2.4f,16);dl->PathStroke(ic,0,1.5f);}
+            else if(i==3)dl->AddCircleFilled(ImVec2(icx,icy),5,snap.game.attached?theme::success():theme::text_dim(),16);
+            else{dl->AddRect(ImVec2(icx-6,icy-5),ImVec2(icx+6,icy+5),ic,3,0,1.3f);dl->AddLine(ImVec2(icx-3,icy-1),ImVec2(icx+3,icy-1),ic,1);}
+            dl->AddText(ImVec2(mn.x+35,mn.y+10),active?theme::text_bright():(hov?theme::text_bright():theme::text()),tab_names[i]);
         }
 
         // User card. Username/avatar extraction is intentionally not guessed from unverified memory.
@@ -834,10 +745,10 @@ namespace ui {
                 dl->AddLine( ImVec2( av.x - 5.f + i * 3.2f, av.y - h * 0.5f ),
                     ImVec2( av.x - 5.f + i * 3.2f, av.y + h * 0.5f ), theme::accent(), 1.3f );
             }
-            dl->AddText( ImVec2( p0.x + 50.f, p0.y + 14.f ), theme::text_bright(), "osu! player" );
-            dl->AddText( ImVec2( p0.x + 50.f, p0.y + 34.f ), snap.game.attached ? theme::success() : theme::text_dim(),
-                snap.game.attached ? "lazer connected" : "waiting for lazer" );
-            dl->AddText( ImVec2( p0.x + 50.f, p0.y + 51.f ), theme::text_dim(), "profile: safe mode" );
+            if(m_user_avatar)dl->AddImageRounded(m_user_avatar,ImVec2(av.x-17,av.y-17),ImVec2(av.x+17,av.y+17),ImVec2(0,0),ImVec2(1,1),IM_COL32_WHITE,17.f);
+            dl->AddText(ImVec2(p0.x+50.f,p0.y+14.f),theme::text_bright(),m_user.substr(0,20).c_str());
+            dl->AddText(ImVec2(p0.x+50.f,p0.y+34.f),snap.game.attached?theme::success():theme::text_dim(),snap.game.attached?"lazer connected":"waiting for lazer");
+            const std::string sub="Stable · "+m_plan;dl->AddText(ImVec2(p0.x+50.f,p0.y+51.f),theme::text_dim(),sub.substr(0,25).c_str());
         }
 
         // Top bar / draggable area.
@@ -854,8 +765,8 @@ namespace ui {
                 m_menu_offset_y += static_cast<int>( io.MouseDelta.y );
             }
 
-            dl->AddText( S( SIDEBAR_W + 18.f, 12.f ), theme::text_bright(), tab_names[m_tab] );
-            dl->AddText( S( SIDEBAR_W + 18.f, 32.f ), theme::text_dim(), tab_subtitles[m_tab] );
+            dl->AddText( S( SIDEBAR_W + 18.f, 12.f ), theme::text_bright(), tab_names[visible_active] );
+            dl->AddText( S( SIDEBAR_W + 18.f, 32.f ), theme::text_dim(), tab_subtitles[visible_active] );
 
             const bool connected = snap.game.attached && snap.game.client == osu::client_kind_t::lazer;
             const float pill_w = 116.f;
@@ -1333,6 +1244,10 @@ namespace ui {
             checkbox( "Stream proof", &stream_proof );
             ly = ImGui::GetCursorPos( ).y + 4.0f;
 
+            ImGui::SetCursorPos( ImVec2( L_X + 12.0f, ly ) );
+            checkbox( "Watermark", &m_hud_enabled );
+            ly = ImGui::GetCursorPos( ).y + 4.0f;
+
             const float lbox_bottom = ly + 12.0f;
             dl->ChannelsSetCurrent( 0 );
             draw_glass_card( dl, S(L_X, lbox_top), S(L_X + L_W, lbox_bottom), 8.0f, theme::accent() );
@@ -1392,108 +1307,34 @@ namespace ui {
             dl->ChannelsMerge( );
         }
         else if ( m_tab == 6 ) {
-            if ( m_config_profiles.empty( ) )
-                m_config_profiles = config::list_profiles( );
-
-            const float lbox_top = TITLE_H + 14.0f + content_slide;
-            float ly = lbox_top + 30.0f;
-
-            dl->ChannelsSplit( 2 );
-            dl->ChannelsSetCurrent( 1 );
-
-            dl->AddText( S( L_X + 14.0f, ly ), theme::text_bright(), "Config name:" );
-            ly += ImGui::GetTextLineHeight( ) + 6.0f;
-
-            ImGui::SetCursorPos( ImVec2( L_X + 12.0f, ly ) );
-            text_input( "##cfg_name", m_config_name_utf8, IM_ARRAYSIZE( m_config_name_utf8 ), L_W - 24.0f );
-            ly = ImGui::GetCursorPos( ).y + 8.0f;
-
-            ImGui::SetCursorPos( ImVec2( L_X + 12.0f, ly ) );
-            if ( button( "Save", ( L_W - 36.0f ) * 0.5f, 24.0f ) ) {
-                const std::string name = config::sanitize_name( m_config_name_utf8 );
-                if ( name.empty( ) ) m_config_status = "Enter a config name first.";
-                else if ( config::save_profile( name, capture_settings( ) ) ) {
-                    m_config_status = "Saved \"" + name + "\".";
-                    m_config_profiles = config::list_profiles( );
-                    strncpy_s( m_config_name_utf8, name.c_str( ), _TRUNCATE );
-                }
-                else m_config_status = "Failed to save config.";
+            const float lbox_top=TITLE_H+14.f+content_slide;float ly=lbox_top+30.f;
+            dl->ChannelsSplit(2);dl->ChannelsSetCurrent(1);
+            dl->AddText(S(L_X+14.f,ly),theme::text_bright(),"Cloud configs · Stable only");ly+=ImGui::GetTextLineHeight()+8.f;
+            ImGui::SetCursorPos(ImVec2(L_X+12.f,ly));if(button("Refresh cloud",L_W-24.f,24.f))refresh_cloud();ly=ImGui::GetCursorPos().y+8.f;
+            const float list_h=MENU_H-ly-96.f;ImGui::SetCursorPos(ImVec2(L_X+12.f,ly));
+            if(ImGui::BeginListBox("##cloud_configs",ImVec2(L_W-24.f,list_h))){
+                for(int i=0;i<(int)m_cloud_profiles.size();++i){const auto& c=m_cloud_profiles[(size_t)i];std::string label=c.name+"##"+c.id;if(c.installed)label+="  [installed]";if(c.status=="pending")label+="  [review]";if(ImGui::Selectable(label.c_str(),m_config_selected==i)){m_config_selected=i;strncpy_s(m_config_name_utf8,c.name.c_str(),_TRUNCATE);strncpy_s(m_config_description_utf8,c.description.c_str(),_TRUNCATE);}}
+                ImGui::EndListBox();
             }
-
-            ImGui::SetCursorPos( ImVec2( L_X + 18.0f + ( L_W - 36.0f ) * 0.5f, ly ) );
-            if ( button( "Refresh list", ( L_W - 36.0f ) * 0.5f, 24.0f ) ) {
-                m_config_profiles = config::list_profiles( );
-                m_config_status = "Profile list refreshed.";
+            ly=ImGui::GetCursorPos().y+7.f;
+            if(m_config_selected>=0&&m_config_selected<(int)m_cloud_profiles.size()){
+                const auto& c=m_cloud_profiles[(size_t)m_config_selected];
+                ImGui::SetCursorPos(ImVec2(L_X+12.f,ly));
+                if(c.installed){if(button("Apply",(L_W-36.f)*.5f,24.f))cloud_task(6,{{"id",c.id},{"revision",c.revision}});ImGui::SetCursorPos(ImVec2(L_X+18.f+(L_W-36.f)*.5f,ly));if(button("Remove",(L_W-36.f)*.5f,24.f))cloud_task(5,{{"id",c.id}});}
+                else if(button("Install",L_W-24.f,24.f))cloud_task(4,{{"id",c.id},{"revision",c.revision}});
             }
-            ly = ImGui::GetCursorPos( ).y + 10.0f;
+            ly=ImGui::GetCursorPos().y+5.f;if(!m_config_status.empty())dl->AddText(S(L_X+14.f,ly),theme::text_dim(),m_config_status.substr(0,52).c_str());
+            const float lbox_bottom=std::min((float)MENU_H-12.f,ly+28.f);dl->ChannelsSetCurrent(0);draw_glass_card(dl,S(L_X,lbox_top),S(L_X+L_W,lbox_bottom),8.f,theme::accent());dl->AddText(S(L_X+14.f,lbox_top+8.f),theme::text_accent(),"cloud library");dl->ChannelsMerge();
 
-            dl->AddText( S( L_X + 14.0f, ly ), theme::text_bright(), "Saved configs:" );
-            ly += ImGui::GetTextLineHeight( ) + 6.0f;
-
-            ImGui::SetCursorPos( ImVec2( L_X + 12.0f, ly ) );
-            const float list_h = MENU_H - ly - 80.0f;
-            if ( ImGui::BeginListBox( "##cfg_list", ImVec2( L_W - 24.0f, list_h ) ) ) {
-                for ( int i = 0; i < static_cast<int>( m_config_profiles.size( ) ); ++i ) {
-                    const bool selected = ( m_config_selected == i );
-                    if ( ImGui::Selectable( m_config_profiles[ static_cast<size_t>( i ) ].c_str( ), selected ) ) {
-                        m_config_selected = i;
-                        strncpy_s( m_config_name_utf8, m_config_profiles[ static_cast<size_t>( i ) ].c_str( ), _TRUNCATE );
-                    }
-                }
-                ImGui::EndListBox( );
-            }
-            ly = ImGui::GetCursorPos( ).y + 8.0f;
-
-            ImGui::SetCursorPos( ImVec2( L_X + 12.0f, ly ) );
-            if ( button( "Load", L_W - 24.0f, 24.0f ) ) {
-                std::string name = config::sanitize_name( m_config_name_utf8 );
-                if ( name.empty( ) && m_config_selected >= 0 && m_config_selected < static_cast<int>( m_config_profiles.size( ) ) )
-                    name = m_config_profiles[ static_cast<size_t>( m_config_selected ) ];
-                config::settings_t loaded{};
-                if ( name.empty( ) )
-                    m_config_status = "Select or enter a config name.";
-                else if ( config::load_profile( name, loaded ) ) {
-                    apply_settings( loaded );
-                    strncpy_s( m_config_name_utf8, name.c_str( ), _TRUNCATE );
-                    m_config_status = "Loaded \"" + name + "\".";
-                }
-                else m_config_status = "Config not found.";
-            }
-            ly = ImGui::GetCursorPos( ).y + 6.0f;
-
-            if ( !m_config_status.empty( ) ) {
-                dl->AddText( S( L_X + 14.0f, ly ), theme::text_dim(), m_config_status.c_str( ) );
-                ly += ImGui::GetTextLineHeight( ) + 4.0f;
-            }
-
-            const float lbox_bottom = ly + 12.0f;
-            dl->ChannelsSetCurrent( 0 );
-            draw_glass_card( dl, S(L_X, lbox_top), S(L_X + L_W, lbox_bottom), 8.0f, theme::accent() );
-            dl->AddText( S( L_X + 14.0f, lbox_top + 8.0f ), theme::text_accent(), "profiles" );
-            dl->ChannelsMerge( );
-
-            const float rbox_top = TITLE_H + 14.0f;
-            float ry = rbox_top + 30.0f;
-            dl->ChannelsSplit( 2 );
-            dl->ChannelsSetCurrent( 1 );
-
-            dl->AddText( S( R_X + 14.0f, ry ), theme::text_dim(), "Saves all module settings," );
-            ry += ImGui::GetTextLineHeight( ) + 2.0f;
-            dl->AddText( S( R_X + 14.0f, ry ), theme::text_dim(), "keys, replay path, and system options." );
-            ry += ImGui::GetTextLineHeight( ) + 8.0f;
-
-            char path_buf[ 512 ]{};
-            WideCharToMultiByte( CP_UTF8, 0, config::configs_dir( ).wstring( ).c_str( ), -1, path_buf, sizeof( path_buf ), nullptr, nullptr );
-            dl->AddText( S( R_X + 14.0f, ry ), theme::text_dim(), "Folder:" );
-            ry += ImGui::GetTextLineHeight( ) + 4.0f;
-            dl->AddText( S( R_X + 14.0f, ry ), theme::text(), path_buf );
-            ry += ImGui::GetTextLineHeight( ) + 4.0f;
-
-            const float rbox_bottom = ry + 12.0f;
-            dl->ChannelsSetCurrent( 0 );
-            draw_glass_card( dl, S(R_X, rbox_top), S(R_X + R_W, rbox_bottom), 8.0f, theme::accent() );
-            dl->AddText( S( R_X + 14.0f, rbox_top + 8.0f ), theme::text_accent(), "config files" );
-            dl->ChannelsMerge( );
+            const float rbox_top=TITLE_H+14.f;float ry=rbox_top+30.f;dl->ChannelsSplit(2);dl->ChannelsSetCurrent(1);
+            dl->AddText(S(R_X+14.f,ry),theme::text_bright(),"Publish your current settings");ry+=ImGui::GetTextLineHeight()+8.f;
+            dl->AddText(S(R_X+14.f,ry),theme::text_dim(),"Name");ry+=20.f;ImGui::SetCursorPos(ImVec2(R_X+12.f,ry));text_input("##cloud_name",m_config_name_utf8,IM_ARRAYSIZE(m_config_name_utf8),R_W-24.f);ry=ImGui::GetCursorPos().y+7.f;
+            dl->AddText(S(R_X+14.f,ry),theme::text_dim(),"Description");ry+=20.f;ImGui::SetCursorPos(ImVec2(R_X+12.f,ry));text_input("##cloud_desc",m_config_description_utf8,IM_ARRAYSIZE(m_config_description_utf8),R_W-24.f);ry=ImGui::GetCursorPos().y+10.f;
+            dl->AddText(S(R_X+14.f,ry),theme::text_dim(),"Save private: only your account sees it.");ry+=21.f;dl->AddText(S(R_X+14.f,ry),theme::text_dim(),"Submit for review: asks an admin to publish it");ry+=19.f;dl->AddText(S(R_X+14.f,ry),theme::text_dim(),"for other Stable users. No .cfg file is created.");ry+=30.f;
+            auto send=[&](int kind){std::string name=m_config_name_utf8,desc=m_config_description_utf8;if(name.size()<2){m_config_status="Enter a name (2+ characters).";return;}auto cur=capture_settings();cur.autobot_enabled=false;cur.tap_enabled=false;cur.lab_enabled=false;cur.replay_path_utf8.clear();std::ostringstream out;config::serialize_settings(out,name,cur);cloud_task(kind,{{"name",name},{"description",desc},{"cfg",out.str()}});};
+            ImGui::SetCursorPos(ImVec2(R_X+12.f,ry));if(button("Save private",(R_W-36.f)*.5f,26.f))send(2);ImGui::SetCursorPos(ImVec2(R_X+18.f+(R_W-36.f)*.5f,ry));if(button("Submit for review",(R_W-36.f)*.5f,26.f))send(3);ry=ImGui::GetCursorPos().y+18.f;
+            ImGui::SetCursorPos(ImVec2(R_X+12.f,ry));if(button("UNINJECT / CLOSE",R_W-24.f,26.f)){notify("OSU!BAND","Closing cleanly…");PostMessageW(m_hwnd,WM_CLOSE,0,0);}ry=ImGui::GetCursorPos().y+8.f;
+            const float rbox_bottom=ry+12.f;dl->ChannelsSetCurrent(0);draw_glass_card(dl,S(R_X,rbox_top),S(R_X+R_W,rbox_bottom),8.f,theme::accent());dl->AddText(S(R_X+14.f,rbox_top+8.f),theme::text_accent(),"publish / review");dl->ChannelsMerge();
         }
 
         render_open_dropdown( );

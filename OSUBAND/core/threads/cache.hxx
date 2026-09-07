@@ -45,7 +45,7 @@ namespace threads {
 
             m_process_thread = std::thread( [ this ] { process_loop( ); } );
             m_game_thread = std::thread( [ this ] {
-                ::SetThreadPriority( ::GetCurrentThread( ), THREAD_PRIORITY_TIME_CRITICAL );
+                ::SetThreadPriority( ::GetCurrentThread( ), THREAD_PRIORITY_ABOVE_NORMAL );
                 game_loop( );
             } );
             m_beatmap_thread = std::thread( [ this ] { beatmap_loop( ); } );

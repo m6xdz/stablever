@@ -2,7 +2,7 @@
 
 #include <impl/struct/game_snapshot.hxx>
 #include <impl/memory/input.hxx>
-#include <core/relax/nt_input.hxx>
+
 #include <Windows.h>
 #include <vector>
 #include <algorithm>
@@ -71,6 +71,8 @@ namespace relax {
             m_last_audio_time = 0;
             m_last_audio_sync_time = 0.0;
             m_last_jitter = 0.f;
+            m_stream_length=0;
+            m_last_update_game_time = -1;
         }
 
     public:
@@ -88,11 +90,17 @@ namespace relax {
 
             if ( game_time < m_last_game_time - 200 ) {
                 reset_state( game );
+            } else if (m_last_update_game_time >= 0 && game_time - m_last_update_game_time > 250) {
+                // A long scheduler/reader stall must not be paid back as a burst of
+                // hundreds of key edges on the render/input thread.  Drop stale
+                // work and resume from the current song position instead.
+                resync_after_time_jump(game,map);
             }
 
             schedule_clicks( game, map );
 
             m_last_game_time = game_time;
+            m_last_update_game_time = game_time;
 
             advance_past_objects( game, map );
             purge_stale( game_time );
@@ -121,7 +129,9 @@ namespace relax {
         double m_last_audio_sync_time = 0.0;
         float m_last_jitter = 0.f;
 
-        c_nt_input m_nt;
+        WORD m_left_vk=0,m_right_vk=0;
+        int m_stream_length=0;
+        int m_last_update_game_time=-1;
 
         mutable std::mutex m_mtx;
 
@@ -182,36 +192,44 @@ namespace relax {
             m_last_audio_time = 0;
             m_last_audio_sync_time = 0.0;
             m_last_jitter = 0.f;
+            m_stream_length=0;
+            m_last_update_game_time=-1;
         }
 
-        void release_all_keys( const osu::game_snapshot_t& game ) {
-            WORD k1 = 0, k2 = 0;
-            resolve_keys( game, k1, k2 );
-            const bool use_nt = m_nt.available( );
-            if ( m_left_down ) {
-                if ( use_nt ) m_nt.release( k1 );
-                else input::release_vk( k1 );
-                m_left_down = false;
-            }
-            if ( m_right_down ) {
-                if ( use_nt ) m_nt.release( k2 );
-                else input::release_vk( k2 );
-                m_right_down = false;
-            }
+        void resync_after_time_jump(const osu::game_snapshot_t& game,const osu::beatmap_data_t& map) {
+            release_all_keys(game);
+            m_click_queue.clear();
+            const auto it=std::lower_bound(map.objects.begin(),map.objects.end(),game.cur_time-80,
+                [](const osu::hit_object_t& obj,int t){return obj.start_time<t;});
+            const int previous=static_cast<int>(std::distance(map.objects.begin(),it))-1;
+            m_last_hit_obj_idx=previous;
+            m_scheduled_through_idx=previous;
+            m_last_click_time=-99999;
+            m_use_k2_next=false;
+            m_last_audio_time=game.cur_time;
+            m_last_audio_sync_time=get_time_ms();
+            m_last_jitter=0.f;
+            m_stream_length=0;
         }
 
-        void press_key( WORD vk, bool& down ) {
-            if ( !vk || down ) return;
-            if ( m_nt.available( ) ) m_nt.press( vk );
-            else input::press_vk( vk );
-            down = true;
+        static bool send_key(WORD vk,bool down) {
+            if(!vk)return false;
+            INPUT event{};event.type=INPUT_KEYBOARD;event.ki.wVk=vk;
+            event.ki.dwFlags=down?0:KEYEVENTF_KEYUP;
+            return ::SendInput(1,&event,sizeof(event))==1;
         }
-
-        void release_key( WORD vk, bool& down ) {
-            if ( !vk || !down ) return;
-            if ( m_nt.available( ) ) m_nt.release( vk );
-            else input::release_vk( vk );
-            down = false;
+        void release_all_keys(const osu::game_snapshot_t&) {
+            if(m_left_down)send_key(m_left_vk,false);
+            if(m_right_down)send_key(m_right_vk,false);
+            m_left_down=m_right_down=false;m_left_vk=m_right_vk=0;
+        }
+        bool press_key(WORD vk,bool& down) {
+            if(!vk||down)return false;
+            down=send_key(vk,true);return down;
+        }
+        void release_key(WORD vk,bool& down) {
+            if(!vk||!down)return;
+            send_key(vk,false);down=false;
         }
 
         bool should_alternate( int inter_tap_ms ) {
@@ -241,11 +259,18 @@ namespace relax {
                 m_click_queue.end( ) );
         }
 
+        int key_busy_until(WORD key) const {
+            int until=-1;
+            for(const auto& c:m_click_queue)
+                if(c.key==key&&!c.released)until=std::max(until,c.release_time);
+            return until;
+        }
+
         void schedule_clicks( const osu::game_snapshot_t& game, const osu::beatmap_data_t& map ) {
             WORD k1 = 0, k2 = 0;
             resolve_keys( game, k1, k2 );
 
-            int current_stream_length = 0;
+            int& current_stream_length=m_stream_length;
             int last_obj_start_time = -99999;
             if ( m_scheduled_through_idx >= 0 && m_scheduled_through_idx < static_cast<int>( map.objects.size( ) ) ) {
                 last_obj_start_time = map.objects[ static_cast<size_t>( m_scheduled_through_idx ) ].start_time;
@@ -253,6 +278,9 @@ namespace relax {
 
             for ( int i = m_scheduled_through_idx + 1; i < static_cast<int>( map.objects.size( ) ); ++i ) {
                 const auto& obj = map.objects[ static_cast<size_t>( i ) ];
+                // Skip history after pause/retry; only keep a short lookahead.
+                if(obj.end_time < game.cur_time - 50) {m_scheduled_through_idx=i;last_obj_start_time=obj.start_time;current_stream_length=0;continue;}
+                if(obj.start_time > game.cur_time + 1000)break;
 
                 const int prev_interval = obj.start_time - last_obj_start_time;
                 if ( prev_interval > 0 && prev_interval < 100 ) {
@@ -323,12 +351,25 @@ namespace relax {
                 if ( should_alternate( inter_tap ) )
                     m_use_k2_next = !m_use_k2_next;
 
-                const WORD chosen = m_use_k2_next ? k2 : k1;
+                WORD chosen = m_use_k2_next ? k2 : k1;
+                const WORD other = m_use_k2_next ? k1 : k2;
                 if ( !chosen ) continue;
+
+                // Sliders often overlap the next object's press window.  Never
+                // retrigger a key that is still owned by an active hold when the
+                // other gameplay key is available; doing so used to cut slider
+                // holds and could create a large catch-up burst after a stall.
+                if(key_busy_until(chosen)>press_time+3 && other && key_busy_until(other)<=press_time+3)
+                    chosen=other;
 
                 m_click_queue.push_back( { press_time, release_time, chosen, false, false } );
                 m_last_click_time = press_time;
                 m_scheduled_through_idx = i;
+                if(m_click_queue.size()>128) {
+                    // Defensive bound for malformed maps/readers.  A one-second
+                    // lookahead should never legitimately need this many edges.
+                    break;
+                }
             }
         }
 
@@ -361,17 +402,36 @@ namespace relax {
             WORD k1 = 0, k2 = 0;
             resolve_keys( game, k1, k2 );
 
-            for ( auto& c : m_click_queue ) {
-                if ( !c.pressed && est_gt >= static_cast<double>( c.press_time ) ) {
-                    bool& ref = ( c.key == k1 ) ? m_left_down : m_right_down;
-                    press_key( c.key, ref );
-                    c.pressed = true;
-                    continue;
+            // Jitter may change event order. Dispatch the earliest due edge,
+            // with release-before-press ties, and transfer ownership on retrigger.
+            // Cap work per tick so a reader hiccup can never freeze osu! while
+            // Relax tries to catch up.
+            int dispatched=0;
+            for(;;){
+                if(dispatched++>=64){
+                    release_all_keys(game);
+                    m_click_queue.clear();
+                    m_scheduled_through_idx=m_last_hit_obj_idx;
+                    break;
                 }
-                if ( c.pressed && !c.released && est_gt >= static_cast<double>( c.release_time ) ) {
-                    bool& ref = ( c.key == k1 ) ? m_left_down : m_right_down;
-                    release_key( c.key, ref );
-                    c.released = true;
+                scheduled_click_t* next=nullptr;int when=0;bool releasing=false;
+                for(auto& c:m_click_queue){
+                    if(c.released)continue;
+                    const bool up=c.pressed;const int time=up?c.release_time:c.press_time;
+                    if(time>est_gt)continue;
+                    if(!next||time<when||(time==when&&up&&!releasing)){next=&c;when=time;releasing=up;}
+                }
+                if(!next)break;
+                auto& c=*next;
+                bool& down=c.key==k1?m_left_down:m_right_down;
+                WORD& held=c.key==k1?m_left_vk:m_right_vk;
+                if(releasing){release_key(held,down);held=0;c.released=true;}
+                else {
+                    // An old hold must not later release a new note on this key.
+                    for(auto& old:m_click_queue)if(&old!=next&&old.key==c.key&&old.pressed&&!old.released){old.released=true;}
+                    if(down)release_key(held,down);
+                    if(!press_key(c.key,down))break;
+                    held=c.key;c.pressed=true;
                 }
             }
 

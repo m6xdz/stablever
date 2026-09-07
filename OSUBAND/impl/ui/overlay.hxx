@@ -19,6 +19,7 @@
 #include <core/threads/cache.hxx>
 #include <impl/input/mouse_hook.hxx>
 #include <impl/config/config_store.hxx>
+#include <impl/ui/studio.hxx>
 #include <impl/util/texture_loader.hxx>
 #include <impl/cloud/avatar.hxx>
 #include <future>
@@ -56,7 +57,7 @@ namespace ui {
         relax::c_relax& relax( ) { return m_relax; }
         replay::c_replay_bot& replay( ) { return m_replay; }
 
-        void set_account(const std::string& name,const std::string& plan,const std::string& avatar="",const std::string& id="") {m_user=name;m_plan=plan;m_avatar_url=avatar;m_user_id=id;m_authorized=true;}
+        void set_account(const std::string& name,const std::string& plan,const std::string& avatar="",const std::string& id="") {m_user=name;m_plan=plan;m_avatar_url=avatar;m_user_id=id;m_authorized=true;m_studio.user=name;m_studio.plan=plan;m_studio.user_id=id;m_studio.authorized=true;}
         void set_authorized(bool value,uint64_t deadline=UINT64_MAX){m_authorized=value;m_auth_deadline=deadline;}
         bool stream_proof = false;
 
@@ -81,6 +82,7 @@ namespace ui {
         ID3D11RenderTargetView* m_rtv = nullptr;
 
         int m_tab = 0;
+        stable_ui::model m_studio;
         char m_replay_path_utf8[ 512 ]{};
         char m_config_name_utf8[ 128 ]{};
         char m_config_description_utf8[ 240 ]{};

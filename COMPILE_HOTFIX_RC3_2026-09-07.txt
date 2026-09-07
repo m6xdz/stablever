@@ -1,0 +1,8 @@
+OSU!BAND Stable compile hotfix RC3
+
+Fixed MSVC errors in impl/ui/overlay.hxx line 95:
+- ImTextureID is ImU64 in the bundled Dear ImGui, so nullptr is not a valid initializer.
+- m_user_avatar now initializes with ImTextureID_Invalid (0), the official Dear ImGui invalid texture id.
+
+This addresses the C2440/C2439 errors shown by GitHub Actions.
+No gameplay/module logic changed in this hotfix.

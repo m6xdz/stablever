@@ -92,7 +92,7 @@ namespace ui {
         std::future<cloud_result> m_cloud_job;
         cloud::avatar_cache m_avatars;
         std::string m_user="OSU!BAND member",m_plan="Stable",m_user_id,m_avatar_url,m_active_stamp,m_pending_name,m_review_stamp;
-        ImTextureID m_user_avatar=nullptr;
+        ImTextureID m_user_avatar=ImTextureID_Invalid;
         std::vector<ImTextureID> m_profile_avatars;
         std::optional<config::settings_t> m_pending_config;
         std::unordered_map<std::string,std::string> m_known_review_status;

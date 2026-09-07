@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <random>
 #include <cstring>
+#include <cstdint>
 
 #pragma comment( lib, "d3d11.lib" )
 #pragma comment( lib, "dxgi.lib" )
@@ -269,7 +270,7 @@ namespace ui {
     }
     void c_overlay::refresh_cloud(){cloud_task(1);}
     void c_overlay::cloud_tick(){
-        m_avatars.tick(m_device);m_user_avatar=reinterpret_cast<ImTextureID>(m_avatars.get(m_avatar_url));m_profile_avatars.clear();for(const auto&p:m_cloud_profiles)m_profile_avatars.push_back(reinterpret_cast<ImTextureID>(m_avatars.get(p.avatar_url)));
+        m_avatars.tick(m_device);m_user_avatar=static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(m_avatars.get(m_avatar_url)));m_profile_avatars.clear();for(const auto&p:m_cloud_profiles)m_profile_avatars.push_back(static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(m_avatars.get(p.avatar_url))));
         if(m_cloud_job.valid()&&m_cloud_job.wait_for(std::chrono::milliseconds(0))==std::future_status::ready){auto r=m_cloud_job.get();m_cloud_busy=false;m_next_cloud_poll=GetTickCount64()+8000;if(!r.error.empty()){m_config_status=r.error;notify("Cloud",r.error,false);}else try{
             std::string selected=m_config_selected>=0&&m_config_selected<(int)m_cloud_profiles.size()?m_cloud_profiles[m_config_selected].id:"";auto prev=m_known_review_status;m_cloud_profiles.clear();m_config_selected=-1;m_user_id=r.data.value("userId",m_user_id);
             for(const auto&c:r.data.at("configs")){config::profile_meta_t p;p.id=c.at("id");p.owner_id=c.at("owner_id");p.name=c.at("name");p.author=c.value("author","");p.avatar_url=c.value("avatar","");p.description=c.value("description","");p.status=c.value("status","private");p.review_note=c.value("review_note","");p.author_role=c.value("author_role","user");p.updated_at=c.value("updated_at",int64_t(0));p.reviewed_at=c.value("reviewed_at",int64_t(0));p.reviewed_by_name=c.value("reviewed_by_name","");p.official=c.value("official",0)!=0;p.installed=c.value("installed",false);p.revision=c.at("revision");p.channel=c.value("channel","stable");if(p.channel!="stable")continue;if(p.id==selected)m_config_selected=(int)m_cloud_profiles.size();if(p.owner_id==m_user_id){auto it=prev.find(p.id);if(it!=prev.end()&&it->second!=p.status&&(p.status=="published"||p.status=="rejected")){auto admin=p.reviewed_by_name.empty()?"Administrator":p.reviewed_by_name;if(p.status=="published")notify("Config approved",admin+std::string(" · ")+p.name);else notify("Config rejected",admin+std::string(" · ")+p.name,false);}m_known_review_status[p.id]=p.status;}m_cloud_profiles.push_back(std::move(p));}

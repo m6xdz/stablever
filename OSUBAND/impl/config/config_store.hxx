@@ -55,19 +55,6 @@ namespace config {
         bool hud_enabled = false;
         int emergency_key = 0x77;
 
-        bool autobot_enabled = false;
-        float autobot_aim_spread = 0.15f;
-        float autobot_curve_strength = 0.33f;
-        float autobot_drift_amount = 1.5f;
-        float autobot_momentum = 0.85f;
-        float autobot_slider_laziness = 0.15f;
-        float autobot_spinner_rpm = 400.f;
-
-        bool tap_enabled = false;
-        int tap_assist_window = 100;
-        int tap_randomization = 15;
-        bool tap_ignore_sliders = false;
-
         int custom_left_key = 'Z';
         int custom_right_key = 'X';
         int menu_keybind = VK_F4;
@@ -166,20 +153,6 @@ namespace config {
         write_line(out,"system.lab_enabled",s.lab_enabled);
         write_line(out,"system.hud_enabled",s.hud_enabled);
         write_line(out,"keys.emergency",s.emergency_key);
-
-        write_line( out, "autobot.enabled", s.autobot_enabled );
-        write_line( out, "autobot.aim_spread", s.autobot_aim_spread );
-        write_line( out, "autobot.curve_strength", s.autobot_curve_strength );
-        write_line( out, "autobot.drift_amount", s.autobot_drift_amount );
-        write_line( out, "autobot.momentum", s.autobot_momentum );
-        write_line( out, "autobot.slider_laziness", s.autobot_slider_laziness );
-        write_line( out, "autobot.spinner_rpm", s.autobot_spinner_rpm );
-
-        write_line( out, "tap.enabled", s.tap_enabled );
-        write_line( out, "tap.assist_window", s.tap_assist_window );
-        write_line( out, "tap.randomization", s.tap_randomization );
-        write_line( out, "tap.ignore_sliders", s.tap_ignore_sliders );
-
 
         write_line( out, "keys.left", s.custom_left_key );
         write_line( out, "keys.right", s.custom_right_key );
@@ -301,28 +274,6 @@ namespace config {
             else if(key=="system.lab_enabled") parse_bool(val,s.lab_enabled);
             else if(key=="system.hud_enabled") parse_bool(val,s.hud_enabled);
             else if(key=="keys.emergency") parse_int(s.emergency_key);
-            else if ( key == "autobot.enabled" )
-                parse_bool( val, s.autobot_enabled );
-            else if ( key == "autobot.aim_spread" )
-                parse_float( s.autobot_aim_spread );
-            else if ( key == "autobot.curve_strength" )
-                parse_float( s.autobot_curve_strength );
-            else if ( key == "autobot.drift_amount" )
-                parse_float( s.autobot_drift_amount );
-            else if ( key == "autobot.momentum" )
-                parse_float( s.autobot_momentum );
-            else if ( key == "autobot.slider_laziness" )
-                parse_float( s.autobot_slider_laziness );
-            else if ( key == "autobot.spinner_rpm" )
-                parse_float( s.autobot_spinner_rpm );
-            else if ( key == "tap.enabled" )
-                parse_bool( val, s.tap_enabled );
-            else if ( key == "tap.assist_window" )
-                parse_int( s.tap_assist_window );
-            else if ( key == "tap.randomization" )
-                parse_int( s.tap_randomization );
-            else if ( key == "tap.ignore_sliders" )
-                parse_bool( val, s.tap_ignore_sliders );
             else if ( key == "keys.left" )
                 parse_int( s.custom_left_key );
             else if ( key == "keys.right" )
@@ -354,17 +305,9 @@ namespace config {
         s.relax_k2_hold_spread=std::isfinite(s.relax_k2_hold_spread) ? std::clamp(s.relax_k2_hold_spread, 2.0f, 30.0f) : defaults.relax_k2_hold_spread;
         s.relax_hold_floor=std::isfinite(s.relax_hold_floor) ? std::clamp(s.relax_hold_floor, 10.0f, 60.0f) : defaults.relax_hold_floor;
         s.relax_hold_ceiling=std::isfinite(s.relax_hold_ceiling) ? std::clamp(s.relax_hold_ceiling, 60.0f, 150.0f) : defaults.relax_hold_ceiling;
-        s.autobot_aim_spread=std::isfinite(s.autobot_aim_spread) ? std::clamp(s.autobot_aim_spread, 0.0f, 1.0f) : defaults.autobot_aim_spread;
-        s.autobot_curve_strength=std::isfinite(s.autobot_curve_strength) ? std::clamp(s.autobot_curve_strength, 0.0f, 1.0f) : defaults.autobot_curve_strength;
-        s.autobot_drift_amount=std::isfinite(s.autobot_drift_amount) ? std::clamp(s.autobot_drift_amount, 0.0f, 5.0f) : defaults.autobot_drift_amount;
-        s.autobot_momentum=std::isfinite(s.autobot_momentum) ? std::clamp(s.autobot_momentum, 0.0f, 0.95f) : defaults.autobot_momentum;
-        s.autobot_slider_laziness=std::isfinite(s.autobot_slider_laziness) ? std::clamp(s.autobot_slider_laziness, 0.0f, 1.0f) : defaults.autobot_slider_laziness;
-        s.autobot_spinner_rpm=std::isfinite(s.autobot_spinner_rpm) ? std::clamp(s.autobot_spinner_rpm, 200.0f, 477.0f) : defaults.autobot_spinner_rpm;
         s.relax_tap_style=std::clamp(s.relax_tap_style, 0, 1);
         s.relax_singletap_bpm_cap=std::clamp(s.relax_singletap_bpm_cap, 100, 300);
         s.relax_manual_offset_ms=std::clamp(s.relax_manual_offset_ms, -100, 100);
-        s.tap_assist_window=std::clamp(s.tap_assist_window, 0, 250);
-        s.tap_randomization=std::clamp(s.tap_randomization, 0, 40);
         s.menu_keybind=std::clamp(s.menu_keybind, 8, 254);
         s.emergency_key=std::clamp(s.emergency_key, 8, 254);
         s.custom_left_key=std::clamp(s.custom_left_key, 8, 254);
@@ -372,9 +315,7 @@ namespace config {
         if(s.custom_left_key==s.custom_right_key) s.custom_right_key=(s.custom_left_key=='X'?'Z':'X');
         if(s.menu_keybind==s.emergency_key) s.emergency_key=(s.menu_keybind==0x77?0x78:0x77);
         // Only one component may own automatic tapping/cursor playback.
-        if(s.replay_enabled) {s.autobot_enabled=false;s.aim_enabled=false;s.relax_enabled=false;s.tap_enabled=false;}
-        else if(s.autobot_enabled) {s.aim_enabled=false;s.relax_enabled=false;s.tap_enabled=false;}
-        else if(s.relax_enabled) s.tap_enabled=false;
+        if(s.replay_enabled) {s.aim_enabled=false;s.relax_enabled=false;}
     }
 
     struct profile_meta_t {

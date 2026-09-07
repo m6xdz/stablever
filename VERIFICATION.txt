@@ -8,14 +8,11 @@ Static checks performed in the build workspace:
 - every ClCompile / ClInclude path referenced by the projects exists;
 - no osu!stable client / offsets / client-kind references remain;
 - braces/parentheses balanced in the main changed runtime/UI sources;
-- gameplay module hashes match the working baseline exactly:
-  aimbot.hxx      a573b1dfe42c5c9466ed9a2462d9476697947a8c1def17e430b2fb3b56eaf772
-  a_core.hxx      f120c285ba2fd7d32ebebb5abce98f2578da14fa2fb112fc299f6bb3553e9f1a
-  relax.hxx       07e55a22d477e662f412ac10cb28ff9ef7f5130b45423bdf0bc4f5e89ee94292
-  autobot.hxx     5d1aee2603bffcb1ec5d487d0a397c674939b3454b3b0f60949d3c6786653b13
-  tap_assist.hxx  722740912ea36d126596dc82a93caf19f2e5fa77268471ad60ded93d08604c37
-  replay_bot.hxx  95cd4c19c45259a564c1b12132bec508382c6e913f3858dd888a8256e72dd6fe
-  osr_decoder.hxx 0b052d3addf12a53e2b62fb32d8729c3abfaf6403de94c62c733e2d5b5a2956f
+- Stable gameplay surface is limited to Aim Assist, Relax and Replay.
+- AutoBot and TapAssist source directories, project entries, settings fields and hidden UI branches were removed from Stable.
+- Cloud config serialization in Stable no longer emits AutoBot/TapAssist keys.
+- Stable/Beta channel filtering remains server-enforced.
+
 
 Runtime/Windows build note:
 This environment does not contain MSVC + the Windows SDK, so the source could not be compiled or executed here. A GitHub Actions workflow is included to perform the real Release x64 build on Windows.

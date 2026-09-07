@@ -54,44 +54,6 @@ namespace {
         return anims[ key ];
     }
 
-    enum ACCENT_STATE {
-        ACCENT_DISABLED = 0,
-        ACCENT_ENABLE_GRADIENT = 1,
-        ACCENT_ENABLE_TRANSPARENTGRADIENT = 2,
-        ACCENT_ENABLE_BLURBEHIND = 3,
-        ACCENT_ENABLE_ACRYLICBLURBEHIND = 4,
-        ACCENT_ENABLE_HOSTBACKDROP = 5,
-        ACCENT_INVALID_STATE = 6
-    };
-
-    struct ACCENT_POLICY {
-        int State;
-        int Flags;
-        int GradientColor;
-        int AnimationId;
-    };
-
-    struct WINCOMPATTRDATA {
-        int Attribute;
-        ACCENT_POLICY* Data;
-        SIZE_T SizeOfData;
-        int Reserved;
-    };
-
-    inline void enable_acrylic( HWND hwnd ) {
-        HMODULE user32 = GetModuleHandleW( L"user32.dll" );
-        if ( !user32 ) return;
-        auto SetWindowCompositionAttribute = reinterpret_cast<BOOL (WINAPI*)( HWND, WINCOMPATTRDATA* )>(
-            GetProcAddress( user32, "SetWindowCompositionAttribute" ) );
-        if ( !SetWindowCompositionAttribute ) return;
-
-        ACCENT_POLICY policy = { ACCENT_ENABLE_BLURBEHIND, 0, 0x00000000, 0 };
-        WINCOMPATTRDATA data = { 19, &policy, sizeof( policy ), 0 };
-        SetWindowCompositionAttribute( hwnd, &data );
-
-        MARGINS margins = { -1, -1, -1, -1 };
-        DwmExtendFrameIntoClientArea( hwnd, &margins );
-    }
 
 }
 
@@ -311,8 +273,8 @@ namespace ui {
         if(m_cloud_job.valid()&&m_cloud_job.wait_for(std::chrono::milliseconds(0))==std::future_status::ready){auto r=m_cloud_job.get();m_cloud_busy=false;m_next_cloud_poll=GetTickCount64()+8000;if(!r.error.empty()){m_config_status=r.error;notify("Cloud",r.error,false);}else try{
             std::string selected=m_config_selected>=0&&m_config_selected<(int)m_cloud_profiles.size()?m_cloud_profiles[m_config_selected].id:"";auto prev=m_known_review_status;m_cloud_profiles.clear();m_config_selected=-1;m_user_id=r.data.value("userId",m_user_id);
             for(const auto&c:r.data.at("configs")){config::profile_meta_t p;p.id=c.at("id");p.owner_id=c.at("owner_id");p.name=c.at("name");p.author=c.value("author","");p.avatar_url=c.value("avatar","");p.description=c.value("description","");p.status=c.value("status","private");p.review_note=c.value("review_note","");p.author_role=c.value("author_role","user");p.updated_at=c.value("updated_at",int64_t(0));p.reviewed_at=c.value("reviewed_at",int64_t(0));p.reviewed_by_name=c.value("reviewed_by_name","");p.official=c.value("official",0)!=0;p.installed=c.value("installed",false);p.revision=c.at("revision");p.channel=c.value("channel","stable");if(p.channel!="stable")continue;if(p.id==selected)m_config_selected=(int)m_cloud_profiles.size();if(p.owner_id==m_user_id){auto it=prev.find(p.id);if(it!=prev.end()&&it->second!=p.status&&(p.status=="published"||p.status=="rejected")){auto admin=p.reviewed_by_name.empty()?"Administrator":p.reviewed_by_name;if(p.status=="published")notify("Config approved",admin+std::string(" · ")+p.name);else notify("Config rejected",admin+std::string(" · ")+p.name,false);}m_known_review_status[p.id]=p.status;}m_cloud_profiles.push_back(std::move(p));}
-            const auto&review=r.data.value("reviewTarget",cloud::json());if(review.is_object()&&review.contains("config_id")){auto stamp=review.at("config_id").get<std::string>()+":"+std::to_string(review.at("revision").get<int>());if(stamp!=m_review_stamp){config::settings_t next;std::istringstream in(review.at("cfg").get<std::string>());if(config::parse_settings(in,next)){config::validate(next);next.autobot_enabled=false;next.tap_enabled=false;next.lab_enabled=false;next.replay_path_utf8.clear();m_pending_config=next;m_pending_name=review.value("name","Review config");m_review_stamp=stamp;notify("Review config ready",m_pending_name+" · "+review.value("author",""));}}}
-            const auto&active=r.data.at("active");if(active.is_object()){auto stamp=active.at("id").get<std::string>()+":"+std::to_string(active.at("updated_at").get<int64_t>());if(stamp!=m_active_stamp){config::settings_t next;std::istringstream in(active.at("cfg").get<std::string>());if(!config::parse_settings(in,next))throw std::runtime_error("Invalid cloud config");config::validate(next);next.autobot_enabled=false;next.tap_enabled=false;next.lab_enabled=false;next.replay_path_utf8.clear();m_pending_config=next;m_pending_name=active.value("name","Cloud config");m_active_stamp=stamp;notify("Config queued",m_pending_name);}}
+            const auto&review=r.data.value("reviewTarget",cloud::json());if(review.is_object()&&review.contains("config_id")){auto stamp=review.at("config_id").get<std::string>()+":"+std::to_string(review.at("revision").get<int>());if(stamp!=m_review_stamp){config::settings_t next;std::istringstream in(review.at("cfg").get<std::string>());if(config::parse_settings(in,next)){config::validate(next);next.lab_enabled=false;next.replay_path_utf8.clear();m_pending_config=next;m_pending_name=review.value("name","Review config");m_review_stamp=stamp;notify("Review config ready",m_pending_name+" · "+review.value("author",""));}}}
+            const auto&active=r.data.at("active");if(active.is_object()){auto stamp=active.at("id").get<std::string>()+":"+std::to_string(active.at("updated_at").get<int64_t>());if(stamp!=m_active_stamp){config::settings_t next;std::istringstream in(active.at("cfg").get<std::string>());if(!config::parse_settings(in,next))throw std::runtime_error("Invalid cloud config");config::validate(next);next.lab_enabled=false;next.replay_path_utf8.clear();m_pending_config=next;m_pending_name=active.value("name","Cloud config");m_active_stamp=stamp;notify("Config queued",m_pending_name);}}
             if(r.kind==2)notify("Config saved","Private · Stable");if(r.kind==3)notify("Sent for review","An administrator can publish it for Stable.");if(r.kind==4)notify("Config installed","Cloud only");if(r.kind==5)notify("Config removed","You can install it again later.");
         }catch(const std::exception&e){m_config_status=e.what();notify("Cloud",e.what(),false);}}
         if(m_pending_config&&m_authorized&&m_prev_state!=osu::game_state_t::play){apply_settings(*m_pending_config);m_pending_config.reset();notify("Config applied",m_pending_name);m_config_status="Applied: "+m_pending_name;}
@@ -422,19 +384,6 @@ namespace ui {
         s.replay_path_utf8 = m_replay_path_utf8;
         s.replay_parse_buttons = m_replay.parse_buttons;
 
-        s.autobot_enabled = false;
-        s.autobot_aim_spread = m_autobot.aim_spread;
-        s.autobot_curve_strength = m_autobot.curve_strength;
-        s.autobot_drift_amount = m_autobot.drift_amount;
-        s.autobot_momentum = m_autobot.momentum;
-        s.autobot_slider_laziness = m_autobot.slider_laziness;
-        s.autobot_spinner_rpm = m_autobot.spinner_rpm;
-
-        s.tap_enabled = false;
-        s.tap_assist_window = m_tap_assist.assist_window;
-        s.tap_randomization = m_tap_assist.randomization;
-        s.tap_ignore_sliders = m_tap_assist.ignore_sliders;
-
         s.custom_left_key = m_custom_left_key;
         s.custom_right_key = m_custom_right_key;
         s.menu_keybind = m_menu_keybind;
@@ -485,19 +434,6 @@ namespace ui {
 
         m_replay.parse_buttons = s.replay_parse_buttons;
 
-        m_autobot.enabled = false;
-        m_autobot.aim_spread = s.autobot_aim_spread;
-        m_autobot.curve_strength = s.autobot_curve_strength;
-        m_autobot.drift_amount = s.autobot_drift_amount;
-        m_autobot.momentum = s.autobot_momentum;
-        m_autobot.slider_laziness = s.autobot_slider_laziness;
-        m_autobot.spinner_rpm = s.autobot_spinner_rpm;
-
-        m_tap_assist.enabled = false;
-        m_tap_assist.assist_window = s.tap_assist_window;
-        m_tap_assist.randomization = s.tap_randomization;
-        m_tap_assist.ignore_sliders = s.tap_ignore_sliders;
-
         m_custom_left_key = s.custom_left_key;
         m_custom_right_key = s.custom_right_key;
         m_menu_keybind = s.menu_keybind;
@@ -514,8 +450,6 @@ namespace ui {
         apply_custom_keys( mod_game );
         m_relax.on_leave_play( mod_game );
         m_replay.on_leave_play( mod_game );
-        m_autobot.on_leave_play( mod_game );
-        m_tap_assist.on_leave_play( mod_game );
     }
 
     void c_overlay::tick_modules( const osu::game_snapshot_t& game, const osu::beatmap_data_t& beatmap ) {
@@ -955,47 +889,6 @@ namespace ui {
             dl->AddText( S( R_X + 14.0f, rbox_top + 8.0f ), theme::text_accent(), "hold times & status" );
             dl->ChannelsMerge( );
         }
-        else if ( m_tab == 2 ) {
-            const float lbox_top = TITLE_H + 14.0f + content_slide + replay_banner_h;
-            float ly = lbox_top + 30.0f;
-
-            dl->ChannelsSplit( 2 );
-            dl->ChannelsSetCurrent( 1 );
-
-            ImGui::SetCursorPos( ImVec2( L_X + 12.0f, ly ) );
-            checkbox( "Enable tap assist", &m_tap_assist.enabled );
-            ly = ImGui::GetCursorPos( ).y + 4.0f;
-
-            ImGui::SetCursorPos( ImVec2( L_X + 12.0f, ly ) );
-            checkbox( "Ignore sliders", &m_tap_assist.ignore_sliders );
-            ly = ImGui::GetCursorPos( ).y;
-
-            const float lbox_bottom = ly + 12.0f;
-            dl->ChannelsSetCurrent( 0 );
-            draw_glass_card( dl, S(L_X, lbox_top), S(L_X + L_W, lbox_bottom), 8.0f, theme::accent() );
-            dl->AddText( S( L_X + 14.0f, lbox_top + 8.0f ), theme::text_accent(), "tap assist" );
-            dl->ChannelsMerge( );
-
-            const float rbox_top = TITLE_H + 14.0f;
-            float ry = rbox_top + 30.0f;
-
-            dl->ChannelsSplit( 2 );
-            dl->ChannelsSetCurrent( 1 );
-
-            ImGui::SetCursorPos( ImVec2( R_X + 12.0f, ry ) );
-            slider_int( "Assist Window", &m_tap_assist.assist_window, 0, 250, " ms" );
-            ry = ImGui::GetCursorPos( ).y + 3.0f;
-
-            ImGui::SetCursorPos( ImVec2( R_X + 12.0f, ry ) );
-            slider_int( "Randomization", &m_tap_assist.randomization, 0, 40, " ms" );
-            ry = ImGui::GetCursorPos( ).y;
-
-            const float rbox_bottom = ry + 12.0f;
-            dl->ChannelsSetCurrent( 0 );
-            draw_glass_card( dl, S(R_X, rbox_top), S(R_X + R_W, rbox_bottom), 8.0f, theme::accent() );
-            dl->AddText( S( R_X + 14.0f, rbox_top + 8.0f ), theme::text_accent(), "tap assist tune" );
-            dl->ChannelsMerge( );
-        }
         else if ( m_tab == 3 ) {
             const float lbox_top = TITLE_H + 14.0f + content_slide + replay_banner_h;
             float ly = lbox_top + 30.0f;
@@ -1079,65 +972,6 @@ namespace ui {
             dl->ChannelsSetCurrent( 0 );
             draw_glass_card( dl, S(R_X, rbox_top), S(R_X + R_W, rbox_bottom), 8.0f, theme::accent() );
             dl->AddText( S( R_X + 14.0f, rbox_top + 8.0f ), theme::text_accent(), "replay options" );
-            dl->ChannelsMerge( );
-        }
-        else if ( m_tab == 4 ) {
-            const float lbox_top = TITLE_H + 14.0f + content_slide + replay_banner_h;
-            float ly = lbox_top + 30.0f;
-
-            dl->ChannelsSplit( 2 );
-            dl->ChannelsSetCurrent( 1 );
-
-            ImGui::SetCursorPos( ImVec2( L_X + 12.0f, ly ) );
-            checkbox( "Enable autobot", &m_autobot.enabled );
-            ly = ImGui::GetCursorPos( ).y + 4.0f;
-
-            ImGui::SetCursorPos( ImVec2( L_X + 12.0f, ly ) );
-            slider_float( "Aim Spread", &m_autobot.aim_spread, 0.0f, 1.0f, "", "%.2f" );
-            ly = ImGui::GetCursorPos( ).y + 4.0f;
-
-            ImGui::SetCursorPos( ImVec2( L_X + 12.0f, ly ) );
-            slider_float( "Curve Strength", &m_autobot.curve_strength, 0.0f, 1.0f, "", "%.2f" );
-            ly = ImGui::GetCursorPos( ).y + 4.0f;
-
-            ImGui::SetCursorPos( ImVec2( L_X + 12.0f, ly ) );
-            slider_float( "Drift Amount", &m_autobot.drift_amount, 0.0f, 5.0f, "", "%.2f" );
-            ly = ImGui::GetCursorPos( ).y + 4.0f;
-
-            ImGui::SetCursorPos( ImVec2( L_X + 12.0f, ly ) );
-            slider_float( "Momentum", &m_autobot.momentum, 0.0f, 0.95f, "", "%.2f" );
-            ly = ImGui::GetCursorPos( ).y + 4.0f;
-
-            ImGui::SetCursorPos( ImVec2( L_X + 12.0f, ly ) );
-            slider_float( "Slider Laziness", &m_autobot.slider_laziness, 0.0f, 1.0f, "", "%.2f" );
-            ly = ImGui::GetCursorPos( ).y + 4.0f;
-
-            ImGui::SetCursorPos( ImVec2( L_X + 12.0f, ly ) );
-            slider_float( "Spinner RPM", &m_autobot.spinner_rpm, 200.0f, 477.0f, " rpm", "%.0f" );
-            ly = ImGui::GetCursorPos( ).y;
-
-            const float lbox_bottom = ly + 12.0f;
-            dl->ChannelsSetCurrent( 0 );
-            draw_glass_card( dl, S(L_X, lbox_top), S(L_X + L_W, lbox_bottom), 8.0f, theme::accent() );
-            dl->AddText( S( L_X + 14.0f, lbox_top + 8.0f ), theme::text_accent(), "autobot options" );
-            dl->ChannelsMerge( );
-
-            const float rbox_top = TITLE_H + 14.0f;
-            float ry = rbox_top + 30.0f;
-
-            dl->ChannelsSplit( 2 );
-            dl->ChannelsSetCurrent( 1 );
-
-            if ( m_autobot.enabled && snap.game.cur_state == osu::game_state_t::play )
-                dl->AddText( S( R_X + 14.0f, ry ), IM_COL32( 100, 230, 160, 255 ), "Status: Running" );
-            else
-                dl->AddText( S( R_X + 14.0f, ry ), theme::text_dim(), "Status: Idle" );
-            ry += ImGui::GetTextLineHeight( ) + 8.0f;
-
-            const float rbox_bottom = ry + 12.0f;
-            dl->ChannelsSetCurrent( 0 );
-            draw_glass_card( dl, S(R_X, rbox_top), S(R_X + R_W, rbox_bottom), 8.0f, theme::accent() );
-            dl->AddText( S( R_X + 14.0f, rbox_top + 8.0f ), theme::text_accent(), "diagnostics" );
             dl->ChannelsMerge( );
         }
          else if ( m_tab == 5 ) {
@@ -1331,7 +1165,7 @@ namespace ui {
             dl->AddText(S(R_X+14.f,ry),theme::text_dim(),"Name");ry+=20.f;ImGui::SetCursorPos(ImVec2(R_X+12.f,ry));text_input("##cloud_name",m_config_name_utf8,IM_ARRAYSIZE(m_config_name_utf8),R_W-24.f);ry=ImGui::GetCursorPos().y+7.f;
             dl->AddText(S(R_X+14.f,ry),theme::text_dim(),"Description");ry+=20.f;ImGui::SetCursorPos(ImVec2(R_X+12.f,ry));text_input("##cloud_desc",m_config_description_utf8,IM_ARRAYSIZE(m_config_description_utf8),R_W-24.f);ry=ImGui::GetCursorPos().y+10.f;
             dl->AddText(S(R_X+14.f,ry),theme::text_dim(),"Save private: only your account sees it.");ry+=21.f;dl->AddText(S(R_X+14.f,ry),theme::text_dim(),"Submit for review: asks an admin to publish it");ry+=19.f;dl->AddText(S(R_X+14.f,ry),theme::text_dim(),"for other Stable users. No .cfg file is created.");ry+=30.f;
-            auto send=[&](int kind){std::string name=m_config_name_utf8,desc=m_config_description_utf8;if(name.size()<2){m_config_status="Enter a name (2+ characters).";return;}auto cur=capture_settings();cur.autobot_enabled=false;cur.tap_enabled=false;cur.lab_enabled=false;cur.replay_path_utf8.clear();std::ostringstream out;config::serialize_settings(out,name,cur);cloud_task(kind,{{"name",name},{"description",desc},{"cfg",out.str()}});};
+            auto send=[&](int kind){std::string name=m_config_name_utf8,desc=m_config_description_utf8;if(name.size()<2){m_config_status="Enter a name (2+ characters).";return;}auto cur=capture_settings();cur.lab_enabled=false;cur.replay_path_utf8.clear();std::ostringstream out;config::serialize_settings(out,name,cur);cloud_task(kind,{{"name",name},{"description",desc},{"cfg",out.str()}});};
             ImGui::SetCursorPos(ImVec2(R_X+12.f,ry));if(button("Save private",(R_W-36.f)*.5f,26.f))send(2);ImGui::SetCursorPos(ImVec2(R_X+18.f+(R_W-36.f)*.5f,ry));if(button("Submit for review",(R_W-36.f)*.5f,26.f))send(3);ry=ImGui::GetCursorPos().y+18.f;
             ImGui::SetCursorPos(ImVec2(R_X+12.f,ry));if(button("UNINJECT / CLOSE",R_W-24.f,26.f)){notify("OSU!BAND","Closing cleanly…");PostMessageW(m_hwnd,WM_CLOSE,0,0);}ry=ImGui::GetCursorPos().y+8.f;
             const float rbox_bottom=ry+12.f;dl->ChannelsSetCurrent(0);draw_glass_card(dl,S(R_X,rbox_top),S(R_X+R_W,rbox_bottom),8.f,theme::accent());dl->AddText(S(R_X+14.f,rbox_top+8.f),theme::text_accent(),"publish / review");dl->ChannelsMerge();

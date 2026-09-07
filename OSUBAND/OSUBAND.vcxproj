@@ -105,7 +105,6 @@
   <ItemGroup>
     <ClInclude Include="core\aim_assist\aimbot.hxx" />
     <ClInclude Include="core\aim_assist\a_core.hxx" />
-    <ClInclude Include="core\autobot\autobot.hxx" />
     <ClInclude Include="core\beatmap\i_beatmap_provider.hxx" />
     <ClInclude Include="core\beatmap\lazer_index.hxx" />
     <ClInclude Include="core\beatmap\lazer_memory.hxx" />
@@ -119,7 +118,6 @@
     <ClInclude Include="core\relax\relax.hxx" />
     <ClInclude Include="core\replay\osr_decoder.hxx" />
     <ClInclude Include="core\replay\replay_bot.hxx" />
-        <ClInclude Include="core\tap_assist\tap_assist.hxx" />
     <ClInclude Include="core\threads\cache.hxx" />
     <ClInclude Include="impl\defs\offsets_lazer.hxx" />
         <ClInclude Include="impl\deps\7zTypes.h" />

@@ -176,13 +176,7 @@
     <ClInclude Include="impl\util\playfield.hxx">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="core\autobot\autobot.hxx">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="impl\config\config_store.hxx">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="core\tap_assist\tap_assist.hxx">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="impl\input\keyboard_hook.hxx">

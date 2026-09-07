@@ -365,7 +365,7 @@ namespace game {
             else if ( game_time_ok )
                 snap.cur_time = static_cast<int32_t>( game_time );
 
-            // Do not let Aim/Relax/Autobot run on a Player graph with no verified
+            // Do not let gameplay assistance run on a Player graph with no verified
             // gameplay clock. Once the deterministic clock is readable, gameplay
             // becomes active immediately.
             if ( player && ( player_time_ok || game_time_ok ) )

@@ -6,8 +6,8 @@ OSU!BAND is the lazer-only continuation of the working LAME runtime port for osu
 
 - Product/project/executable renamed to `OSUBAND`.
 - osu!stable client code, offsets and stable attach path removed.
-- Original gameplay modules are preserved byte-for-byte from the known-working LAME baseline:
-  Aim Assist, Relax, Replay and Stable Cloud Configs. Tap Assist and Autobot are not exposed in the Stable build.
+- Stable gameplay surface contains Aim Assist, Relax, Replay and Stable Cloud Configs.
+- Tap Assist and AutoBot have been removed from the Stable source tree, project and config schema.
 - New animated Dear ImGui interface with a custom OSU!BAND identity.
 - Lazer runtime status, bindings and config profiles kept.
 
@@ -19,7 +19,7 @@ OSU!BAND is the lazer-only continuation of the working LAME runtime port for osu
 
 ## Profile card
 
-The menu contains a user-card slot. It currently uses a safe local placeholder rather than guessing at an unverified `API.LocalUser` memory layout. The current osu! source exposes the logged-in user through `API.LocalUser`, so the card is ready for a later verified profile bridge without touching gameplay modules.
+The menu user card is populated from the authenticated OSU!BAND account session: avatar, nickname and subscription information.
 
 ## Build
 

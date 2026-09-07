@@ -15,11 +15,9 @@
 #include <core/aim_assist/aimbot.hxx>
 #include <core/relax/relax.hxx>
 #include <core/replay/replay_bot.hxx>
-#include <core/autobot/autobot.hxx>
 #include <core/threads/cache.hxx>
 #include <impl/input/mouse_hook.hxx>
 #include <impl/config/config_store.hxx>
-#include <core/tap_assist/tap_assist.hxx>
 #include <impl/util/texture_loader.hxx>
 #include <impl/cloud/avatar.hxx>
 #include <future>
@@ -56,8 +54,6 @@ namespace ui {
         aim_assist::c_aimbot& aim( ) { return m_aim; }
         relax::c_relax& relax( ) { return m_relax; }
         replay::c_replay_bot& replay( ) { return m_replay; }
-        autobot::c_autobot& auto_bot( ) { return m_autobot; }
-        tap_assist::c_tap_assist& tap( ) { return m_tap_assist; }
 
         void set_account(const std::string& name,const std::string& plan,const std::string& avatar="",const std::string& id="") {m_user=name;m_plan=plan;m_avatar_url=avatar;m_user_id=id;m_authorized=true;}
         void set_authorized(bool value,uint64_t deadline=UINT64_MAX){m_authorized=value;m_auth_deadline=deadline;}
@@ -77,8 +73,6 @@ namespace ui {
         input::c_mouse_hook m_mouse_hook;
         relax::c_relax m_relax;
         replay::c_replay_bot m_replay;
-        autobot::c_autobot m_autobot;
-        tap_assist::c_tap_assist m_tap_assist;
 
         ID3D11Device* m_device = nullptr;
         ID3D11DeviceContext* m_context = nullptr;
